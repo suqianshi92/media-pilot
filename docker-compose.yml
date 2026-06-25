@@ -26,12 +26,13 @@ services:
   media-pilot-prowlarr-init:
     image: ${MEDIA_PILOT_IMAGE}
     container_name: media-pilot-prowlarr-init
-    command: ["python", "-m", "media_pilot.deployment.bootstrap_prowlarr_indexers"]
+    command: ["python", "-m", "media_pilot.deployment.prowlarr_indexers"]
     environment:
       TZ: ${TZ}
       MEDIA_PILOT_PROWLARR_INIT_URL: http://media-pilot-prowlarr:9696
+      MEDIA_PILOT_SHARED_SECRETS_PATH: /secrets/shared-secrets.env
     volumes:
-      - shared-secrets:/data:ro
+      - shared-secrets:/secrets:ro
     depends_on:
       media-pilot-init:
         condition: service_completed_successfully
@@ -49,6 +50,7 @@ services:
       - "${MEDIA_PILOT_PORT}:8000"
     environment:
       TZ: ${TZ}
+      MEDIA_PILOT_SHARED_SECRETS_PATH: /secrets/shared-secrets.env
       MEDIA_PILOT_LLM_API_KEY: ${MEDIA_PILOT_LLM_API_KEY}
       MEDIA_PILOT_LLM_BASE_URL: ${MEDIA_PILOT_LLM_BASE_URL}
       MEDIA_PILOT_LLM_MODEL: ${MEDIA_PILOT_LLM_MODEL}
@@ -61,7 +63,7 @@ services:
       MEDIA_PILOT_QBITTORRENT_USERNAME: ${MEDIA_PILOT_QBITTORRENT_USERNAME}
       MEDIA_PILOT_QBITTORRENT_PASSWORD: ${MEDIA_PILOT_QBITTORRENT_PASSWORD}
     volumes:
-      - shared-secrets:/data:ro
+      - shared-secrets:/secrets:ro
       - ${MEDIA_PILOT_DOWNLOADS_DIR}:/data/downloads:ro
       - ${MEDIA_PILOT_WATCH_DIR}:/data/watch:ro
       - ${MEDIA_PILOT_WORKSPACE_DIR}:/data/workspace
