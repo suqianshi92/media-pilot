@@ -38,6 +38,14 @@ Potential future work:
 
 These areas will be driven by real usage feedback. The current priority is a reliable single-node Docker deployment and a stable Agent ingest path.
 
+## Disclaimer
+
+Media Pilot is a self-hosted automation tool for organizing and importing media into a personal library. The project does not provide, host, index, or distribute any media content, and does not encourage or assist with obtaining unauthorized content.
+
+Users are solely responsible for ensuring that their sources, downloads, metadata usage, library contents, and access controls comply with applicable laws, regulations, and third-party terms of service. Any copyright, privacy, adult-content access control, or other compliance responsibility arising from use of this project belongs to the user.
+
+If your deployment may be accessible by family members or other users, configure appropriate network restrictions, reverse-proxy authentication, or other access controls.
+
 ## Flow
 
 ```mermaid
