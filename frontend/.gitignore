@@ -1,0 +1,31 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# 防御: 项目用 npm, pnpm 锁文件 / workspace 配置不应入库.
+# 历史曾被 corepack pnpm 自动生成过孤儿 pnpm-lock.yaml +
+# pnpm-workspace.yaml, 触发 Docker overlay2 symlink 错误.
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.pnpm-store
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

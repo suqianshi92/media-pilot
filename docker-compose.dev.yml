@@ -1,0 +1,18 @@
+services:
+  media-pilot-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: media-pilot:dev
+
+  media-pilot-prowlarr-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: media-pilot:dev
+
+  media-pilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: media-pilot:dev

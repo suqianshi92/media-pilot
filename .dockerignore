@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.claude/
+.playwright-mcp/
+AGENTS.md
+.git/
+.gitignore
+.env
+.env.*
+data/
+tests/
+
+# 前端构建时不需要的主机残留: node_modules 由 `npm ci` 在容器内重装;
+# dist 由容器内 `npm run build` 重新生成; pnpm 锁文件 / workspace
+# 文件是开发者本机残留, Dockerfile 走 npm, 一旦 COPY 进 build context
+# 会污染 pnpm symlink 链接 (overlay2 无法用实文件覆盖 symlink,
+# "cannot replace to directory ... with file" 错误).
+frontend/node_modules
+frontend/dist
+frontend/.pnpm-store
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
+frontend/tsconfig.app.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo

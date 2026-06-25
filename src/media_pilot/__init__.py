@@ -1,0 +1,1 @@
+"""Media Pilot application package."""
