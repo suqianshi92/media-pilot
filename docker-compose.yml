@@ -64,8 +64,8 @@ services:
       MEDIA_PILOT_QBITTORRENT_PASSWORD: ${MEDIA_PILOT_QBITTORRENT_PASSWORD}
     volumes:
       - shared-secrets:/secrets:ro
-      - ${MEDIA_PILOT_DOWNLOADS_DIR}:/data/downloads:ro
-      - ${MEDIA_PILOT_WATCH_DIR}:/data/watch:ro
+      - ${MEDIA_PILOT_DOWNLOADS_DIR}:/data/downloads
+      - ${MEDIA_PILOT_WATCH_DIR}:/data/watch
       - ${MEDIA_PILOT_WORKSPACE_DIR}:/data/workspace
       - ${MEDIA_PILOT_MOVIES_DIR}:/data/library/movies
       - ${MEDIA_PILOT_SHOWS_DIR}:/data/library/shows

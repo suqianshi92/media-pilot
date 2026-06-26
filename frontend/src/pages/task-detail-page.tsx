@@ -1,8 +1,8 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Loader2 } from 'lucide-react'
 
 import {
   ConfidenceBadge,
@@ -15,21 +15,28 @@ import {
 } from '@/components/app/shared-ui'
 import {
   getMediaTypeLabel,
+  getMatchReasonLabel,
+  getProfileLabel,
+  getProviderLabel,
   getSourceSelectionReasonLabel,
   getStatusLabel,
   getTaskStepLabel,
   getTimelineToneLabel,
   getWriteResultStatusLabel,
 } from '@/components/app/task-labels'
+import { MetadataCandidateCard, type MetadataCardCandidate } from '@/components/shared/metadata-candidate-card'
 import { AgentPanel } from '@/components/agent/agent-panel'
 import { createTaskService, type TaskService } from '@/services/task-service'
-import type { MediaSourceSelectionDto, TaskDetailDto } from '@/types/task'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import type { MediaSourceSelectionDto, MetadataCandidateDto, ResearchResponseData, ResearchScope, TaskDetailDto } from '@/types/task'
 import i18n from '@/i18n'
 
 const defaultTaskService = createTaskService()
 export type TaskDetailService = Pick<
   TaskService,
   'getTaskDetail' | 'getRevokePublishCheck' | 'executeRevokePublish' | 'researchCandidates' | 'getProfileOptions'
+  | 'manualSelect'
   | 'listAgentMessages' | 'listAgentDecisions' | 'replyToAgentDecision' | 'listAgentToolCalls' | 'createAgentRun' | 'sendFreeformMessage'
   | 'recoverStuckAgentRun'
 >
@@ -193,6 +200,243 @@ function SourceSelectionSection({ sourceSelection, blockedReason }: { sourceSele
       <div className="grid gap-3">
         <FileList title={t('taskWorkspace.candidateFiles')} files={sourceSelection.candidate_files} />
         <FileList title={t('taskWorkspace.excludedFiles')} files={sourceSelection.excluded_files} />
+      </div>
+    </section>
+  )
+}
+
+function ManualMetadataResearchSection({ detail, service = defaultTaskService }: { detail: TaskDetailDto; service: TaskDetailService }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const taskId = detail.task.id
+  const isAgentRunning = detail.task.status_summary.status === 'agent_running'
+
+  const [keyword, setKeyword] = useState(detail.search_keyword?.keyword ?? '')
+  const [scope, setScope] = useState<ResearchScope>('all')
+  const [candidates, setCandidates] = useState<MetadataCandidateDto[]>([])
+  const [searchSummary, setSearchSummary] = useState<ResearchResponseData['search_summary'] | null>(null)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{ title: string; description: string; variant: 'success' | 'warning' | 'error' } | null>(null)
+
+  useEffect(() => {
+    setKeyword(detail.search_keyword?.keyword ?? '')
+    setScope('all')
+    setCandidates([])
+    setSearchSummary(null)
+    setSearchError(null)
+    setFeedback(null)
+  }, [detail.task.id, detail.search_keyword?.keyword])
+
+  const handleScopeLabel = (value: ResearchScope): string => {
+    if (value === 'all') return t('taskWorkspace.allEnabledSources')
+    return getProfileLabel(value)
+  }
+
+  const researchMutation = useMutation({
+    mutationFn: () => service.researchCandidates(taskId, keyword.trim(), scope),
+    onMutate: () => {
+      setSearchError(null)
+      setFeedback(null)
+      setSearchSummary(null)
+    },
+    onSuccess: (result) => {
+      const data = result.data
+      setCandidates(data.candidates)
+      setSearchSummary(data.search_summary)
+      if (data.candidates.length === 0) {
+        setFeedback({
+          variant: 'warning',
+          title: t('taskWorkspace.noCandidates'),
+          description: t('taskWorkspace.noCandidatesHint'),
+        })
+      }
+    },
+    onError: (err) => {
+      setCandidates([])
+      setSearchSummary(null)
+      setSearchError(err instanceof Error ? err.message : t('taskWorkspace.searchFailed'))
+    },
+  })
+
+  const manualSelectMutation = useMutation({
+    mutationFn: (candidate: MetadataCandidateDto) => service.manualSelect(taskId, {
+      provider: candidate.provider,
+      provider_id: candidate.provider_id,
+      title: candidate.title,
+      year: candidate.year,
+      original_title: candidate.original_title,
+      media_type: candidate.media_type,
+    }),
+    onSuccess: async (result) => {
+      const status = result.data.status
+      const summary = result.data.summary
+      if (status === 'waiting_user') {
+        setFeedback({
+          variant: 'warning',
+          title: t('taskWorkspace.manualSelectWaiting'),
+          description: summary,
+        })
+      } else if (status === 'saved') {
+        setFeedback({
+          variant: 'success',
+          title: t('taskWorkspace.manualSelectSaved'),
+          description: summary,
+        })
+      } else if (status === 'agent_failed') {
+        setFeedback({
+          variant: 'error',
+          title: t('taskWorkspace.manualSelectFailed'),
+          description: summary,
+        })
+      } else {
+        setFeedback({
+          variant: 'success',
+          title: t('taskWorkspace.manualSelectPublished'),
+          description: summary,
+        })
+      }
+
+      const taskDetailPromise = queryClient.refetchQueries({ queryKey: ['task-detail', taskId] })
+      void queryClient.refetchQueries({ queryKey: ['agent-decisions', taskId] })
+      void queryClient.refetchQueries({ queryKey: ['agent-messages', taskId] })
+      void queryClient.refetchQueries({ queryKey: ['agent-tool-calls', taskId] })
+      void queryClient.invalidateQueries({ queryKey: ['flows'] })
+
+      await taskDetailPromise
+    },
+    onError: (err) => {
+      setFeedback({
+        variant: 'error',
+        title: t('taskWorkspace.operationFailed'),
+        description: err instanceof Error ? err.message : t('taskWorkspace.searchFailed'),
+      })
+    },
+  })
+
+  const handleSearch = () => {
+    const normalizedKeyword = keyword.trim()
+    if (!normalizedKeyword) return
+    researchMutation.mutate()
+  }
+
+  const handleSelect = (candidate: MetadataCandidateDto) => {
+    if (isAgentRunning) return
+    manualSelectMutation.mutate(candidate)
+  }
+
+  return (
+    <section className="grid gap-4 rounded-lg border border-border bg-surface p-4">
+      <div className="grid gap-1">
+        <h2 className="text-lg font-medium text-surface-foreground">{t('taskWorkspace.manualMetadataResearch')}</h2>
+        <p className="text-sm text-muted-foreground">{t('taskWorkspace.manualMetadataResearchDesc')}</p>
+      </div>
+
+      {isAgentRunning ? (
+        <InlineMessage
+          variant="warning"
+          title={t('taskWorkspace.manualMetadataResearchBlockedTitle')}
+          description={t('taskWorkspace.manualMetadataResearchBlocked')}
+        />
+      ) : null}
+
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
+        <Input
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              if (!isAgentRunning) handleSearch()
+            }
+          }}
+          placeholder={t('taskWorkspace.searchKeyword')}
+          aria-label={t('taskWorkspace.searchKeyword')}
+          disabled={isAgentRunning}
+        />
+        <select
+          value={scope}
+          onChange={(e) => setScope(e.target.value as ResearchScope)}
+          aria-label={t('taskWorkspace.searchScopeAria')}
+          disabled={isAgentRunning}
+          className="h-10 rounded-md border border-border bg-background px-3 text-sm text-surface-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="all">{handleScopeLabel('all')}</option>
+          <option value="tmdb_movie">{handleScopeLabel('tmdb_movie')}</option>
+          <option value="tmdb_show">{handleScopeLabel('tmdb_show')}</option>
+          <option value="tpdb_adult_movie">{handleScopeLabel('tpdb_adult_movie')}</option>
+        </select>
+        <Button
+          onClick={handleSearch}
+          disabled={isAgentRunning || researchMutation.isPending || !keyword.trim()}
+          size="sm"
+          type="button"
+        >
+          {researchMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {researchMutation.isPending ? t('taskWorkspace.researching') : t('taskWorkspace.researchButton')}
+        </Button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        {t('taskWorkspace.searchScope')}：{handleScopeLabel(scope)}
+      </p>
+
+      {searchError ? <InlineMessage variant="error" title={t('taskWorkspace.searchFailed')} description={searchError} /> : null}
+      {feedback ? <InlineMessage variant={feedback.variant} title={feedback.title} description={feedback.description} /> : null}
+
+      <div className="grid gap-2">
+        {researchMutation.isPending ? (
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" /> {t('taskWorkspace.researching')}
+          </p>
+        ) : null}
+
+        {searchSummary ? (
+          <p className="text-xs text-muted-foreground">
+            {t('taskWorkspace.searchSummary')}：{t('taskWorkspace.searchSummaryTotal')} {searchSummary.total_candidates}（{t('taskWorkspace.searchSummaryScope')}：{handleScopeLabel(searchSummary.scope)}）
+          </p>
+        ) : null}
+
+        {candidates.length > 0 ? (
+          <div className="grid max-h-80 gap-2 overflow-y-auto pr-1">
+            {candidates.map((candidate) => {
+              const cardCandidate: MetadataCardCandidate = {
+                title: candidate.title,
+                original_title: candidate.original_title ?? undefined,
+                year: candidate.year == null ? undefined : candidate.year,
+                provider: getProviderLabel(candidate.provider),
+                provider_id: candidate.provider_id,
+                poster_url: candidate.poster_url ?? undefined,
+                confidence: candidate.confidence,
+                overview: candidate.overview ?? undefined,
+                media_type: getMediaTypeLabel(candidate.media_type),
+                match_reason: getMatchReasonLabel(candidate.match_reason),
+              }
+
+              return (
+                <MetadataCandidateCard key={`${candidate.provider}:${candidate.media_type}:${candidate.provider_id}`} variant="compact" candidate={cardCandidate}>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    disabled={isAgentRunning || manualSelectMutation.isPending}
+                    onClick={() => {
+                      handleSelect(candidate)
+                    }}
+                  >
+                    {t('taskWorkspace.selectCandidate')}
+                  </Button>
+                </MetadataCandidateCard>
+              )
+            })}
+          </div>
+        ) : null}
+
+        {!researchMutation.isPending && candidates.length === 0 && !searchSummary ? (
+          <p className="text-xs text-muted-foreground">{t('taskWorkspace.searchHint')}</p>
+        ) : null}
+        {!researchMutation.isPending && candidates.length === 0 && searchSummary ? (
+          <p className="text-xs text-muted-foreground">{t('taskWorkspace.noCandidatesHint')}</p>
+        ) : null}
       </div>
     </section>
   )
@@ -543,6 +787,7 @@ export function TaskDetailPage({ service = defaultTaskService }: { service?: Tas
           <CompletedHeroSection detail={detail} />
           <BaseInfoSection detail={detail} />
           <SourceSelectionSection sourceSelection={detail.source_selection} blockedReason={null} />
+          <ManualMetadataResearchSection detail={detail} service={service} />
           <MetadataDetailSection metadataDetail={detail.metadata_detail} />
           <WriteResultSection writePlan={detail.write_plan} writeResult={detail.write_result} />
           <PublishInfoSection detail={detail} />

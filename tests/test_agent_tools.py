@@ -882,7 +882,7 @@ class TestDraftPublishPlanTool:
 
 
 class TestSearchMetadataBehavior:
-    def test_no_candidates_no_errors_returns_failure_no_candidates(self, tmp_path):
+    def test_no_candidates_no_errors_returns_success_no_candidates(self, tmp_path):
         from unittest.mock import patch
 
         from tests.test_api_v1 import _make_session_factory
@@ -905,8 +905,9 @@ class TestSearchMetadataBehavior:
                     _make_tool_context(session, config, "t1"),
                     {"keyword": "NoSuchMovie"},
                 )
-        assert result.status == "failure"
+        assert result.status == "success"
         assert result.data["reason"] == "no_candidates"
+        assert result.data["candidates"] == []
         assert "keyword" in result.data
 
     def test_errors_and_no_candidates_returns_failure_provider_errors(self, tmp_path):

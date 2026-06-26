@@ -151,6 +151,151 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('CoMix Wave Films')).toBeInTheDocument()
   })
 
+  it('renders manual metadata research section with keyword input', async () => {
+    renderTaskDetailPage('task-multiple-candidates')
+
+    expect(await screen.findByRole('heading', { level: 2, name: '手动检索元数据' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '搜索关键词' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '搜索范围' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新搜索' })).toBeInTheDocument()
+    expect(screen.getByText('可修改关键词或搜索范围后点击重新搜索。')).toBeInTheDocument()
+  })
+
+  it('searches manual metadata candidates with keyword and scope', async () => {
+    const base = createMockTaskService()
+    let args: { taskId: string; keyword: string; scope: string } | null = null
+
+    const customService: TaskDetailService = {
+      ...base,
+      researchCandidates: async (taskId, keyword, scope) => {
+        args = { taskId, keyword, scope: scope ?? 'all' }
+        return base.researchCandidates(taskId, keyword, scope ?? 'all')
+      },
+    }
+
+    renderTaskDetailPage('task-multiple-candidates', customService)
+
+    const keywordInput = await screen.findByRole('textbox', { name: '搜索关键词' })
+    const scopeSelect = screen.getByRole('combobox', { name: '搜索范围' })
+    const searchButton = screen.getByRole('button', { name: '重新搜索' })
+
+    fireEvent.change(keywordInput, { target: { value: '铃芽之旅' } })
+    fireEvent.change(scopeSelect, { target: { value: 'tmdb_show' } })
+    fireEvent.click(searchButton)
+
+    await waitFor(() => {
+      expect(args).toEqual({ taskId: 'task-multiple-candidates', keyword: '铃芽之旅', scope: 'tmdb_show' })
+    })
+    expect(await screen.findByText('天气之子')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '选择此候选并继续' }).length).toBeGreaterThan(0)
+  })
+
+  it('calls manualSelect and refreshes task-related queries', async () => {
+    const base = createMockTaskService()
+    const called = {
+      getTaskDetail: 0,
+      listAgentMessages: 0,
+      listAgentDecisions: 0,
+      listAgentToolCalls: 0,
+      researchCandidates: 0,
+      manualSelect: 0,
+    }
+
+    const customService: TaskDetailService = {
+      ...base,
+      getTaskDetail: async (taskId) => {
+        called.getTaskDetail += 1
+        return base.getTaskDetail(taskId)
+      },
+      listAgentMessages: async (taskId) => {
+        called.listAgentMessages += 1
+        return base.listAgentMessages(taskId)
+      },
+      listAgentDecisions: async (taskId) => {
+        called.listAgentDecisions += 1
+        return base.listAgentDecisions(taskId)
+      },
+      listAgentToolCalls: async (taskId) => {
+        called.listAgentToolCalls += 1
+        return base.listAgentToolCalls(taskId)
+      },
+      researchCandidates: async (taskId, keyword, scope) => {
+        called.researchCandidates += 1
+        return base.researchCandidates(taskId, keyword, scope)
+      },
+      manualSelect: async (taskId, params) => {
+        called.manualSelect += 1
+        return base.manualSelect(taskId, params)
+      },
+    }
+
+    renderTaskDetailPage('task-multiple-candidates', customService)
+
+    const keywordInput = await screen.findByRole('textbox', { name: '搜索关键词' })
+    fireEvent.change(keywordInput, { target: { value: '天气之子' } })
+    fireEvent.click(screen.getByRole('button', { name: '重新搜索' }))
+
+    await waitFor(() => {
+      expect(called.researchCandidates).toBe(1)
+    })
+    expect(await screen.findByText('天气之子')).toBeInTheDocument()
+
+    const baseline = {
+      getTaskDetail: called.getTaskDetail,
+      listAgentMessages: called.listAgentMessages,
+      listAgentDecisions: called.listAgentDecisions,
+      listAgentToolCalls: called.listAgentToolCalls,
+    }
+
+    fireEvent.click(screen.getAllByRole('button', { name: '选择此候选并继续' })[0])
+
+    await waitFor(() => {
+      expect(called.manualSelect).toBe(1)
+    })
+    await waitFor(() => {
+      expect(called.getTaskDetail).toBeGreaterThan(baseline.getTaskDetail)
+      expect(called.listAgentMessages).toBeGreaterThan(baseline.listAgentMessages)
+      expect(called.listAgentDecisions).toBeGreaterThan(baseline.listAgentDecisions)
+      expect(called.listAgentToolCalls).toBeGreaterThan(baseline.listAgentToolCalls)
+    })
+    expect(await screen.findByText('已选择 天气之子 (tmdb)')).toBeInTheDocument()
+  })
+
+  it('disables manual metadata research inputs when agent is running', async () => {
+    const base = createMockTaskService()
+    const customService: TaskDetailService = {
+      ...base,
+      getTaskDetail: async (taskId) => {
+        const response = await base.getTaskDetail(taskId)
+        if (taskId !== 'task-multiple-candidates') return response
+        return {
+          ...response,
+          data: {
+            ...response.data,
+            task: {
+              ...response.data.task,
+              status_summary: {
+                ...response.data.task.status_summary,
+                status: 'agent_running',
+              },
+            },
+          },
+        }
+      },
+    }
+
+    renderTaskDetailPage('task-multiple-candidates', customService)
+
+    expect(await screen.findByRole('heading', { level: 2, name: '手动检索元数据' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '搜索关键词' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '搜索范围' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重新搜索' })).toBeDisabled()
+    expect(screen.getByText('当前状态不支持人工检索')).toBeInTheDocument()
+    expect(
+      screen.getByText('任务正在 Agent 处理中，不允许手动检索元数据，请等待任务执行完成或使用卡住恢复后重试。'),
+    ).toBeInTheDocument()
+  })
+
   it('renders the write result section for a completed task', async () => {
     renderTaskDetailPage('task-completed')
 
@@ -294,7 +439,7 @@ describe('TaskDetailPage Agent Panel', () => {
 
     const toolCallLabels = await screen.findAllByText('调用工具')
     expect(toolCallLabels.length).toBeGreaterThanOrEqual(2)
-    const toolNames = screen.getAllByText('search_metadata')
+    const toolNames = screen.getAllByText(/search_metadata|搜索元数据/)
     expect(toolNames.length).toBeGreaterThanOrEqual(1)
   })
 

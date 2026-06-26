@@ -61,7 +61,7 @@ def _make_task(
     session_factory,
     *,
     source_path: str,
-    status: str = "agent_running",
+    status: str = "agent_failed",
 ) -> str:
     with session_factory() as session:
         task = IngestTaskRepository(session).create(IngestTaskCreate(
@@ -839,3 +839,174 @@ def test_manual_select_returns_saved_when_candidate_persist_fails(
             select(AgentRun).where(AgentRun.task_id == task_id)
         ).all()
         assert runs == []
+
+
+def test_manual_select_rejects_agent_running_task(
+    tmp_path: Path, stub_dependencies
+) -> None:
+    """agent_running 状态下后端也必须拒绝人工改元数据。"""
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    source_path = config.downloads_dir / "source.mkv"
+    source_path.write_bytes(b"any content")
+    task_id = _make_task(
+        session_factory, source_path=str(source_path), status="agent_running",
+    )
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:123",
+            title="Test Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "rejected"
+    assert "Agent" in result.summary
+
+    with session_factory() as session:
+        candidates = session.scalars(
+            select(MediaCandidate).where(MediaCandidate.task_id == task_id)
+        ).all()
+        assert candidates == []
+
+
+def test_manual_select_supersedes_pending_decisions_before_publishing(
+    tmp_path: Path, monkeypatch, stub_dependencies
+) -> None:
+    """人工改元数据会废弃旧 pending 决策，避免 stale 卡片继续可回复。"""
+    from media_pilot.repository.repositories import (
+        AgentDecisionRequestCreate,
+        AgentDecisionRequestRepository,
+        AgentRunCreate,
+        AgentRunRepository,
+    )
+    from media_pilot.services import manual_selection as ms
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    source_path = config.downloads_dir / "source.mkv"
+    source_path.write_bytes(b"any content")
+    task_id = _make_task(
+        session_factory, source_path=str(source_path), status="waiting_user",
+    )
+
+    with session_factory() as session:
+        run = AgentRunRepository(session).create(AgentRunCreate(
+            task_id=task_id, current_step="select_metadata_candidate",
+        ))
+        decision = AgentDecisionRequestRepository(session).create(
+            AgentDecisionRequestCreate(
+                run_id=run.id,
+                task_id=task_id,
+                decision_type="select_metadata_candidate",
+                question="old",
+                options=[{"id": "old", "label": "Old"}],
+            )
+        )
+        decision_id = decision.id
+        session.commit()
+
+    monkeypatch.setattr(
+        ms,
+        "_quick_publish",
+        lambda session, config, task_id: ms._PublishOutcome(kind="published"),
+    )
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:123",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published"
+
+    with session_factory() as session:
+        decision = session.get(AgentDecisionRequest, decision_id)
+        assert decision is not None
+        assert decision.status == "superseded"
+        assert decision.decision == {
+            "type": "system",
+            "reason": "manual_metadata_selection_override",
+        }
+
+
+def test_manual_select_completed_task_revokes_before_republish(
+    tmp_path: Path, monkeypatch, stub_dependencies
+) -> None:
+    """已入库任务人工改元数据时，必须先撤销旧发布再重新发布。"""
+    from media_pilot.orchestration.revoke_publish import RevokePublishResult
+    from media_pilot.services import manual_selection as ms
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    source_path = config.downloads_dir / "source.mkv"
+    source_path.write_bytes(b"any content")
+    task_id = _make_task(
+        session_factory,
+        source_path=str(source_path),
+        status="library_import_complete",
+    )
+
+    calls: list[str] = []
+
+    def _fake_revoke(session, *, task_id, skip_post_revoke_decision=False, existing_run_id=None):
+        calls.append(f"revoke:{skip_post_revoke_decision}")
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        task.status = "processing"
+        task.current_step = "post_revoke_reingest"
+        session.flush()
+        return RevokePublishResult(
+            status="completed",
+            outcome="ok",
+            decision_id=None,
+        )
+
+    def _fake_publish(session, config, task_id):
+        calls.append("publish")
+        return ms._PublishOutcome(kind="published")
+
+    monkeypatch.setattr(
+        "media_pilot.orchestration.revoke_publish.execute_revoke_publish",
+        _fake_revoke,
+    )
+    monkeypatch.setattr(ms, "_quick_publish", _fake_publish)
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:456",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published"
+    assert calls == ["revoke:True", "publish"]

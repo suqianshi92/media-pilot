@@ -432,7 +432,7 @@ export interface ManualSelectRequest {
 }
 
 export interface ManualSelectResponse {
-  status: 'published' | 'waiting_user' | 'saved'
+  status: 'published' | 'waiting_user' | 'saved' | 'agent_failed'
   summary: string
   candidate_id?: string | null
   decision_id?: string | null

@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from media_pilot.config import AppConfig
@@ -20,7 +21,7 @@ from media_pilot.config import AppConfig
 
 @dataclass(frozen=True, kw_only=True)
 class ManualSelectResult:
-    status: str  # "published" | "waiting_user" | "saved" | "agent_failed"
+    status: str  # "published" | "waiting_user" | "saved" | "agent_failed" | "rejected"
     summary: str
     candidate_id: str | None = None
     decision_id: str | None = None
@@ -35,6 +36,7 @@ class _PublishOutcome:
     final_target_dir: str | None = None
     final_target_file: str | None = None
     conflict_code: str | None = None
+    decision_id: str | None = None
 
 
 def submit_manual_selection(
@@ -58,11 +60,42 @@ def submit_manual_selection(
     5. 安全门禁阻塞 → 创建 AgentDecisionRequest(waiting_user)
     6. 目标冲突 → 创建 AgentDecisionRequest(decision_type="target_conflict", waiting_user)
     """
+    from media_pilot.repository.repositories import IngestTaskRepository
     from media_pilot.services.auto_ingest import (
         check_eligibility,
         fetch_and_save_metadata_detail,
         persist_metadata_selection,
     )
+
+    task_repo = IngestTaskRepository(session)
+    task = task_repo.get(task_id)
+    if task is None:
+        return ManualSelectResult(
+            status="rejected",
+            summary="任务不存在",
+        )
+    if task.status == "agent_running":
+        return ManualSelectResult(
+            status="rejected",
+            summary="任务正在 Agent 处理中，请等待完成或先使用卡住恢复入口",
+        )
+    if task.status == "deleted":
+        return ManualSelectResult(
+            status="rejected",
+            summary="任务已删除，不能重新选择元数据",
+        )
+
+    if task.status == "library_import_complete":
+        revoke_result = _revoke_completed_publish_for_manual_reselect(
+            session, task_id,
+        )
+        if revoke_result is not None:
+            return revoke_result
+
+    _supersede_pending_decisions(
+        session, task_id, reason="manual_metadata_selection_override",
+    )
+    _clear_metadata_facts(session, task_id)
 
     # 1. 持久化用户选择的候选（source="manual" 而非 "agent"）
     sel_result = persist_metadata_selection(
@@ -150,7 +183,7 @@ def submit_manual_selection(
     if outcome.kind == "target_conflict":
         # 目标冲突 → 创建 AgentDecisionRequest(decision_type="target_conflict")
         # 并把任务切到 waiting_user / current_step="target_conflict"
-        decision_id = _create_target_conflict_decision(
+        decision_id = outcome.decision_id or _create_target_conflict_decision(
             session, task_id, outcome, title=title, year=year, provider=provider,
         )
         _write_system_message(
@@ -213,6 +246,9 @@ def _quick_publish(
     orm_detail = detail_repo.get_for_task(task_id)
     if orm_detail is None:
         return _PublishOutcome(kind="failed", reason="no_metadata_detail")
+
+    if orm_detail.media_type == "show" or task.media_type == "show":
+        return _quick_publish_show(session, config, task_id)
 
     adapter_detail = _orm_detail_to_adapter(orm_detail)
 
@@ -283,6 +319,105 @@ def _quick_publish(
         final_target_dir=str(plan.final_target_dir),
         final_target_file=str(plan.final_target_file),
     )
+
+
+def _quick_publish_show(
+    session: Session,
+    config: AppConfig,
+    task_id: str,
+) -> _PublishOutcome:
+    """复用剧集发布工具执行人工选择后的确定性剧集发布。"""
+    from media_pilot.agent.tools.base import ToolContext
+    from media_pilot.agent.tools.show import make_publish_show_to_library
+
+    run = _ensure_manual_select_run(session, task_id)
+    tool = make_publish_show_to_library()
+    result = tool.handler(
+        ToolContext(session=session, config=config, task_id=task_id, run_id=run.id),
+        {"task_id": task_id},
+    )
+    data = result.data if isinstance(result.data, dict) else {}
+    if result.status == "success" and data.get("decision_requested"):
+        return _PublishOutcome(
+            kind="target_conflict",
+            reason="target conflict from publish_show_to_library",
+            final_target_dir=data.get("final_target_dir"),
+            final_target_file=data.get("final_target_file") or data.get("final_target_dir"),
+            conflict_code=data.get("conflict"),
+            decision_id=data.get("decision_id"),
+        )
+    if result.status == "success":
+        from media_pilot.repository.repositories import IngestTaskRepository
+
+        task = IngestTaskRepository(session).get(task_id)
+        if task is not None and task.status == "library_import_complete":
+            task.failure_reason = None
+            session.flush()
+        return _PublishOutcome(
+            kind="published",
+            final_target_dir=data.get("final_target_dir"),
+            final_target_file=data.get("final_target_file"),
+        )
+    return _PublishOutcome(kind="failed", reason=result.summary)
+
+
+def _revoke_completed_publish_for_manual_reselect(
+    session: Session,
+    task_id: str,
+) -> ManualSelectResult | None:
+    """完成态手动改元数据前先撤销旧发布产物。
+
+    返回 None 表示撤销成功，可继续写入新元数据；返回 ManualSelectResult
+    表示撤销失败或任务已被撤销逻辑删除，调用方应停止。
+    """
+    from media_pilot.orchestration.revoke_publish import execute_revoke_publish
+
+    try:
+        result = execute_revoke_publish(
+            session,
+            task_id=task_id,
+            skip_post_revoke_decision=True,
+        )
+    except Exception as exc:
+        return ManualSelectResult(
+            status="agent_failed",
+            summary=f"撤销旧发布失败，无法重新入库：{exc}",
+        )
+
+    if result.status == "deleted":
+        return ManualSelectResult(
+            status="agent_failed",
+            summary="旧发布已撤销，但源文件缺失或结构不支持，任务数据已删除，无法重新入库",
+        )
+    return None
+
+
+def _clear_metadata_facts(session: Session, task_id: str) -> None:
+    """清理旧候选与旧详情，避免人工纠正时混用上一次错误元数据。"""
+    from media_pilot.repository.models import MediaCandidate, MetadataDetail
+
+    session.execute(delete(MetadataDetail).where(MetadataDetail.task_id == task_id))
+    session.execute(delete(MediaCandidate).where(MediaCandidate.task_id == task_id))
+    session.flush()
+
+
+def _supersede_pending_decisions(
+    session: Session,
+    task_id: str,
+    *,
+    reason: str,
+) -> None:
+    """人工重选元数据时废弃旧 pending 决策，避免 stale 卡片继续可回复。"""
+    from media_pilot.repository.models import utc_now
+    from media_pilot.repository.repositories import AgentDecisionRequestRepository
+
+    repo = AgentDecisionRequestRepository(session)
+    for decision in repo.list_pending_by_task(task_id):
+        decision.status = "superseded"
+        decision.decision = {"type": "system", "reason": reason}
+        decision.decided_by = "system"
+        decision.decided_at = utc_now()
+    session.flush()
 
 
 def _write_system_message(session: Session, task_id: str, content: str) -> None:

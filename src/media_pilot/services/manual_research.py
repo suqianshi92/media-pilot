@@ -5,9 +5,7 @@
 2. 解析 scope → 目标 profiles
 3. 对每个 profile 调用 quick_search
 4. 去重、排序、写入 MediaCandidate / AdapterCall
-5. 在单文件普通电影 + 安全硬门禁通过时，调用确定性快捷发布
-6. 否则创建 AgentDecisionRequest(decision_type="manual_research_blocked")
-   让用户通过右侧 Agent 面板决定如何继续
+5. 返回候选给用户选择；不自动发布、不创建决策
 
 旧 ConfirmationRequest 通道已下线；该服务不再创建或修改 ConfirmationRequest。
 """
@@ -64,10 +62,6 @@ class ManualResearchResult:
 
     candidates: list[MediaCandidate]
     summary: SearchSummary
-    quick_publish_attempted: bool = False
-    quick_publish_status: str | None = None  # "published" | "skipped" | 失败原因
-    decision_id: str | None = None
-    decision_type: str | None = None  # "manual_research_blocked" 时填写
 
 
 def run_manual_research(
@@ -78,7 +72,12 @@ def run_manual_research(
     scope: ResearchScope,
     config: AppConfig,
 ) -> ManualResearchResult:
-    """执行 profile-aware 手动重搜并按规则决定是否走快捷发布或创建决策。"""
+    """执行 profile-aware 手动重搜。
+
+    本接口只负责“找候选并落库”，不负责发布。用户确认候选后再通过
+    ``submit_manual_selection`` 进入确定性写入路径，避免搜索动作本身产生
+    隐式副作用。
+    """
     # 1. 记录人工关键词
     SearchKeywordRepository(session).save(
         task_id,
@@ -212,19 +211,12 @@ def run_manual_research(
     )
 
     if not any_success:
-        # 全部失败 → 保留旧候选；创建 manual_research_blocked 决策
+        # 全部失败 → 保留旧候选；不创建决策，交由 UI 展示各 profile 状态。
         summary.kept_existing_candidates = True
-        decision_id, decision_type = _create_blocked_decision(
-            session, task_id, reason="metadata_provider_failed",
-            detail=profile_statuses[0].error_message if profile_statuses else None,
-        )
         session.commit()
         return ManualResearchResult(
             candidates=list(_existing_candidates(session, task_id)),
             summary=summary,
-            quick_publish_attempted=False,
-            decision_id=decision_id,
-            decision_type=decision_type,
         )
 
     # 5. 去重（同 provider 内）
@@ -258,40 +250,11 @@ def run_manual_research(
 
     summary.total_candidates = len(persisted)
 
-    # 8. 决策或快捷发布
-    quick_publish_status: str | None = None
-    decision_id: str | None = None
-    decision_type: str | None = None
-
-    if not persisted:
-        decision_id, decision_type = _create_blocked_decision(
-            session, task_id, reason="no_metadata_candidates",
-        )
-    else:
-        # 尝试走确定性快捷发布（单文件普通电影 + 安全硬门禁）
-        quick_publish_status = _try_quick_publish(session, config, task_id)
-        if quick_publish_status is None:
-            # 阻塞 → 创建 manual_research_blocked 决策
-            decision_id, decision_type = _create_blocked_decision(
-                session, task_id, reason="not_single_safe_movie",
-                detail="多个候选或安全门禁未通过，需要用户决策",
-            )
-        elif quick_publish_status != "published":
-            # 写入失败 → 创建 manual_research_blocked 决策
-            decision_id, decision_type = _create_blocked_decision(
-                session, task_id, reason="quick_publish_failed",
-                detail=quick_publish_status,
-            )
-
     session.commit()
 
     return ManualResearchResult(
         candidates=persisted,
         summary=summary,
-        quick_publish_attempted=quick_publish_status is not None,
-        quick_publish_status=quick_publish_status,
-        decision_id=decision_id,
-        decision_type=decision_type,
     )
 
 
@@ -320,96 +283,6 @@ def _existing_candidates(
         .where(MediaCandidate.task_id == task_id)
         .order_by(MediaCandidate.created_at.asc())
     ))
-
-
-def _try_quick_publish(
-    session: Session,
-    config: AppConfig,
-    task_id: str,
-) -> str | None:
-    """尝试走 services.manual_selection._quick_publish 确定性快捷发布。
-
-    返回 "published"、失败原因字符串、或者 None 表示"无法走快捷发布"
-    (例如非单文件普通电影 / 候选多于 1 / 安全门禁未通过)。
-    """
-    from media_pilot.services.manual_selection import _quick_publish
-
-    try:
-        from media_pilot.services.auto_ingest import check_eligibility
-
-        eligibility = check_eligibility(
-            session=session, config=config, task_id=task_id,
-        )
-
-        # 候选数 != 1 → 走人工决策而非快捷发布
-        if not eligibility.candidate_count or eligibility.candidate_count != 1:
-            return None
-
-        # 非单文件普通电影安全门禁全部通过 → 才尝试快捷发布
-        non_metadata_blockers = [
-            r for r in eligibility.blocking_reasons
-            if r not in ("no_metadata_candidates", "no_clear_metadata_winner")
-        ]
-        if non_metadata_blockers:
-            return None
-
-        return _quick_publish(session, config, task_id, eligibility)
-    except Exception as exc:
-        return f"quick_publish_error: {exc}"
-
-
-def _create_blocked_decision(
-    session: Session,
-    task_id: str,
-    *,
-    reason: str,
-    detail: str | None = None,
-) -> tuple[str | None, str | None]:
-    """当 manual_research 因阻塞无法自动推进时创建 AgentDecisionRequest。
-
-    Returns: (decision_id, decision_type) 或 (None, None) 如果没有可用的 AgentRun。
-    """
-    from media_pilot.repository.repositories import (
-        AgentDecisionRequestCreate,
-        AgentDecisionRequestRepository,
-        AgentRunRepository,
-    )
-
-    run_repo = AgentRunRepository(session)
-    run = run_repo.get_active_or_waiting_by_task(task_id)
-    if run is None:
-        return None, None
-
-    question = f"手动重搜已写入新候选（reason={reason}），但无法自动发布。"
-    if detail:
-        question += f" 详情: {detail}"
-    question += " 请在右侧 Agent 面板选择处理方式。"
-
-    dr_repo = AgentDecisionRequestRepository(session)
-    try:
-        decision = dr_repo.create(AgentDecisionRequestCreate(
-            run_id=run.id,
-            task_id=task_id,
-            decision_type="manual_research_blocked",
-            question=question,
-            free_text_allowed=True,
-            options=[
-                {
-                    "id": "retry",
-                    "label": "重试",
-                    "description": "让 Agent 重新尝试自动处理（适合临时阻塞）",
-                },
-                {
-                    "id": "cancel",
-                    "label": "取消",
-                    "description": "放弃本次入库",
-                },
-            ],
-        ))
-    except ValueError:
-        # 已存在 pending 决策，不重复创建
-        return None, "manual_research_blocked"
-    return decision.id, "manual_research_blocked"
 
 
 def _deduplicate_candidates(

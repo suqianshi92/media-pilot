@@ -453,7 +453,6 @@ def test_api_v1_research_no_pending_discovered_task(tmp_path: Path, monkeypatch)
     assert "confirmation_request" not in body["data"]
 
 
-
 # ---- 状态轮询 ----
 
 

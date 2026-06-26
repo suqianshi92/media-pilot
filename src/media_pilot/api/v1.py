@@ -873,9 +873,8 @@ def research_candidates(
 
     新行为（ConfirmationRequest 已下线）：
     - 写入任务事实（MediaCandidate / SearchKeywordRecord）。
-    - 若单文件普通电影 + 安全硬门禁通过 → 走确定性快捷发布。
-    - 否则创建 AgentDecisionRequest(decision_type="manual_research_blocked")，
-      由右侧 Agent 面板承载。
+    - 只返回候选和 profile 搜索摘要；不会自动发布或创建决策。
+    - 用户显式选择候选后，再通过 /manual-select 进入确定性写入路径。
     - 响应仅包含 candidates + search_summary，不再附带 confirmation_request。
     """
     session_factory: sessionmaker[Session] | None = getattr(
@@ -980,18 +979,7 @@ def research_candidates(
         )
 
         messages = []
-        meta: dict = {
-            "quick_publish_attempted": result.quick_publish_attempted,
-            "quick_publish_status": result.quick_publish_status,
-        }
-        if result.decision_id:
-            meta["decision_id"] = result.decision_id
-            meta["decision_type"] = result.decision_type
-            messages.append(ApiMessage(
-                level="info",
-                code="agent_decision_pending",
-                text="手动重搜已写入候选，但因安全门禁需要用户在 Agent 面板确认",
-            ))
+        meta: dict = {}
 
     return ApiEnvelope(
         status="success",
@@ -1277,6 +1265,35 @@ def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnv
             safe_commit(session)
         except OperationalError:
             return _db_locked_response()
+
+    if result.status == "rejected":
+        return JSONResponse(
+            status_code=409,
+            content=ApiEnvelope(
+                status="error",
+                data={},
+                messages=[ApiMessage(
+                    level="error",
+                    code="manual_select_rejected",
+                    text=result.summary,
+                )],
+                meta={},
+            ).model_dump(),
+        )
+    if result.status == "agent_failed":
+        return JSONResponse(
+            status_code=409,
+            content=ApiEnvelope(
+                status="error",
+                data={},
+                messages=[ApiMessage(
+                    level="error",
+                    code="manual_select_failed",
+                    text=result.summary,
+                )],
+                meta={},
+            ).model_dump(),
+        )
 
     dto = ManualSelectResponse(
         status=result.status,

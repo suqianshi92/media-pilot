@@ -252,7 +252,9 @@ def _handle_search_metadata(context: ToolContext, input_data: dict) -> ToolResul
             },
         )
 
-    # No candidates at all → structured failure
+    # No candidates at all is a valid search result, not a tool execution
+    # failure. Returning success keeps the Agent from burning max_tool_failures
+    # while it tries the next sensible provider / keyword.
     if not result.candidates:
         if result.errors:
             return ToolResult(
@@ -266,10 +268,11 @@ def _handle_search_metadata(context: ToolContext, input_data: dict) -> ToolResul
                 },
             )
         return ToolResult(
-            status="failure",
+            status="success",
             summary=f"No candidates found for '{keyword}' on {provider_name}",
             data={
                 "reason": "no_candidates",
+                "candidates": [],
                 "keyword": keyword,
                 "provider": provider_name,
             },
