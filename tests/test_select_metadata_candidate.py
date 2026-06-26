@@ -222,6 +222,58 @@ class TestPrepareSelectMetadataCandidateDecision:
             assert result.best_candidate["title"] == "Clear Winner"
             assert result.best_candidate["provider_id"] == "tmdb:winner"
 
+    def test_agent_shadow_duplicate_does_not_block_clear_winner(self, tmp_path: Path):
+        """Agent 已选记录与真实 provider 候选重复时, 不应制造 0.95 并列。"""
+        sf = _make_session_factory(tmp_path)
+        with sf() as session:
+            task = _make_task(session)
+            _add_candidate(
+                session,
+                task_id=task.id,
+                source="tpdb",
+                media_type="movie",
+                title="MAAN-1144 - Full Provider Title",
+                year=2026,
+                external_id="jav/70b62c3d",
+                confidence=0.95,
+            )
+            _add_candidate(
+                session,
+                task_id=task.id,
+                source="agent",
+                media_type="movie",
+                title="MAAN-1144",
+                year=2026,
+                external_id="jav/70b62c3d",
+                confidence=0.95,
+            )
+            _add_candidate(
+                session,
+                task_id=task.id,
+                source="tpdb",
+                media_type="movie",
+                title="MAAN-01144",
+                year=2026,
+                external_id="jav/runner-up",
+                confidence=0.45,
+            )
+
+        with sf() as session:
+            from media_pilot.services.select_metadata_candidate import (
+                STATUS_AUTO_CONFIRM,
+                prepare_select_metadata_candidate_decision,
+            )
+
+            result = prepare_select_metadata_candidate_decision(
+                session=session, config=_make_config(tmp_path), task_id=task.id,
+            )
+
+            assert result.status == STATUS_AUTO_CONFIRM
+            assert result.best_candidate is not None
+            assert result.best_candidate["provider"] == "tpdb"
+            assert result.best_candidate["provider_id"] == "jav/70b62c3d"
+            assert result.best_candidate["title"] == "MAAN-1144 - Full Provider Title"
+
     def test_decision_requested_when_no_clear_winner(self, tmp_path: Path):
         """两个候选置信度接近 → 决策请求, 选项全部后端生成."""
         sf = _make_session_factory(tmp_path)

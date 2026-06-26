@@ -160,6 +160,33 @@ def build_candidate_options(
     return options
 
 
+def _drop_agent_shadow_candidates(
+    candidates: list["MediaCandidate"],
+) -> list["MediaCandidate"]:
+    """Drop Agent-created selections that duplicate a real provider candidate.
+
+    ``persist_metadata_selection`` creates source="agent" records to record what
+    the Agent picked. If the original provider candidate is still present, both
+    rows can share the same external_id/confidence and falsely look like a tie.
+    Keep the richer provider row for winner detection and decision options.
+    """
+    provider_keys = {
+        (c.media_type, c.external_id)
+        for c in candidates
+        if c.source != "agent" and c.external_id
+    }
+    if not provider_keys:
+        return candidates
+    return [
+        c for c in candidates
+        if not (
+            c.source == "agent"
+            and c.external_id
+            and (c.media_type, c.external_id) in provider_keys
+        )
+    ]
+
+
 def _real_provider_for_candidate(
     candidate: "MediaCandidate",
     candidates: list["MediaCandidate"],
@@ -771,6 +798,12 @@ def prepare_select_metadata_candidate_decision(
             )
         candidates = MediaCandidateRepository(session).list_for_task(task_id)
     elif not candidates:
+        return SelectMetadataCandidateResult(
+            status=STATUS_NO_CANDIDATES,
+            reason="no_persisted_candidates",
+        )
+    candidates = _drop_agent_shadow_candidates(candidates)
+    if not candidates:
         return SelectMetadataCandidateResult(
             status=STATUS_NO_CANDIDATES,
             reason="no_persisted_candidates",
