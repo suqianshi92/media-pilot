@@ -70,6 +70,32 @@ def _commit_before_llm_call(session: Session, *, run_id: str, step: int) -> None
         raise
 
 
+def _commit_before_tool_execution(
+    session: Session, *, run_id: str, tool_name: str,
+) -> None:
+    """Commit assistant/tool-call records before executing a tool.
+
+    Tool handlers may perform slow network or filesystem work. Persist the
+    assistant message and the ``running`` AgentToolCall first so that the slow
+    side effect does not hold a SQLite write transaction open.
+    """
+    try:
+        session.commit()
+    except OperationalError:
+        logger.warning(
+            "Agent run %s commit-before-tool failed for %s",
+            run_id, tool_name,
+        )
+        try:
+            session.rollback()
+        except Exception:
+            logger.exception(
+                "Agent run %s rollback failed after commit-before-tool",
+                run_id,
+            )
+        raise
+
+
 def _tool_output_for_llm(
     output: dict | None,
     tool_name: str | None = None,
@@ -991,6 +1017,9 @@ def _run_agent_loop(
                     status="running",
                 ))
                 t_start = time.monotonic()
+                _commit_before_tool_execution(
+                    session, run_id=run.id, tool_name=tool_name,
+                )
 
                 # Execute via registry (only if tool is in allowed set for current mode)
                 from media_pilot.agent.sse import AgentStreamEvent, AgentStreamEventType

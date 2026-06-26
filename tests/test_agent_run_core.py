@@ -124,6 +124,86 @@ class TestAgentRunTransactionBoundaries:
             "message_count": 1,
         }
 
+    def test_tool_call_running_record_is_committed_before_handler(self, tmp_path, monkeypatch):
+        """工具执行前, assistant/tool_call 记录必须已提交可见。"""
+        import json
+
+        from media_pilot.agent.runner import run_agent_turn
+        from media_pilot.agent.tools.base import (
+            PermissionLevel,
+            ToolDefinition,
+            ToolResult,
+        )
+        from media_pilot.agent.tools.registry import ToolRegistry
+        from media_pilot.repository.database import create_session_factory, initialize_database
+        from media_pilot.repository.repositories import AgentToolCallRepository
+
+        config = _make_config(tmp_path)
+        initialize_database(config)
+        session_factory = create_session_factory(config)
+
+        with session_factory() as session:
+            task = _make_task(session)
+            task_id = task.id
+
+        observations: dict[str, object] = {}
+
+        def _handler(ctx, _input):
+            with session_factory() as verify_session:
+                calls = AgentToolCallRepository(
+                    verify_session
+                ).list_by_run(ctx.run_id)
+            observations["tool_call_count"] = len(calls)
+            observations["tool_status"] = calls[0].status
+            observations["tool_name"] = calls[0].tool_name
+            return ToolResult(status="success", summary="ok")
+
+        registry = ToolRegistry()
+        registry.register(ToolDefinition(
+            name="inspect_committed_tool_call",
+            description="Inspect committed tool call",
+            parameters={
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+                "additionalProperties": False,
+            },
+            permission_level=PermissionLevel.READ_ONLY,
+            handler=_handler,
+        ))
+
+        import media_pilot.agent.runner as runner_mod
+
+        monkeypatch.setattr(runner_mod, "get_tool_registry", lambda: registry)
+        monkeypatch.setattr(runner_mod, "register_builtin_tools", lambda: None)
+
+        mock = MockLLMClient()
+        mock.add_tool_calls([{
+            "id": "call_inspect",
+            "type": "function",
+            "function": {
+                "name": "inspect_committed_tool_call",
+                "arguments": json.dumps({"task_id": task_id}),
+            },
+        }])
+        mock.add_text_response("Done.")
+
+        with session_factory() as session:
+            result = run_agent_turn(
+                session=session,
+                config=config,
+                task_id=task_id,
+                mock_llm_client=mock,
+            )
+            session.commit()
+
+        assert result.status == "completed"
+        assert observations == {
+            "tool_call_count": 1,
+            "tool_status": "running",
+            "tool_name": "inspect_committed_tool_call",
+        }
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Tool Schema
