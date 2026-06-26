@@ -1270,6 +1270,91 @@ class TestWriteAgentTools:
         assert result.status == "failure"
         assert "unsafe" in result.summary.lower() or "safe" in result.summary.lower()
 
+    def test_publish_movie_failed_write_marks_task_and_run_failed(self, tmp_path, monkeypatch):
+        """真实现场回归: execute_movie_write 返回 failed 时, movie 工具
+        必须把 task/run 收到失败态, 不能让 UI 长期停在 agent_running."""
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        video_path = _safe_video(tmp_path, config)
+
+        with sf() as session:
+            from media_pilot.repository.models import MetadataDetail
+            from media_pilot.repository.repositories import (
+                AgentRunCreate,
+                AgentRunRepository,
+            )
+
+            task = _make_task(
+                session,
+                source_path=str(video_path),
+                media_type="movie",
+                status="agent_running",
+                current_step="agent_running",
+            )
+            task_id = task.id
+            _make_candidate(session, task_id, confidence=0.95)
+            session.add(MetadataDetail(
+                task_id=task_id,
+                provider="tmdb",
+                provider_id="movie:123",
+                media_type="movie",
+                title="Test Movie",
+                original_title=None,
+                year=2024,
+                payload={"poster_url": "https://example.invalid/poster.jpg"},
+            ))
+            run = AgentRunRepository(session).create(
+                AgentRunCreate(task_id=task_id, current_step="agent_start")
+            )
+            run_id = run.id
+            session.commit()
+
+        def fake_execute_movie_write(session, **kwargs):
+            from media_pilot.orchestration.jellyfin_movie_writer import MovieWriteResult
+            from media_pilot.repository.repositories import WriteResultRepository
+
+            WriteResultRepository(session).save(
+                kwargs["task_id"],
+                status="failed",
+                payload={"failure_reason": "poster_download_failed", "warnings": []},
+            )
+            return MovieWriteResult(status="failed", warnings=[])
+
+        monkeypatch.setattr(
+            "media_pilot.orchestration.jellyfin_movie_writer.execute_movie_write",
+            fake_execute_movie_write,
+        )
+
+        with sf() as session:
+            from media_pilot.agent.tools.base import ToolContext
+            from media_pilot.agent.tools.write import _handle_publish_movie_to_library
+
+            ctx = ToolContext(
+                session=session,
+                config=config,
+                task_id=task_id,
+                run_id=run_id,
+            )
+            result = _handle_publish_movie_to_library(ctx, {"task_id": task_id})
+            session.commit()
+
+        assert result.status == "failure"
+        assert result.data["failure_reason"] == "poster_download_failed"
+
+        with sf() as session:
+            from media_pilot.repository.models import AgentRun, IngestTask
+
+            task = session.get(IngestTask, task_id)
+            run = session.get(AgentRun, run_id)
+            assert task.status == "agent_failed"
+            assert task.current_step == "agent_failed"
+            assert task.failure_reason == "poster_download_failed"
+            assert run.status == "failed"
+            assert run.current_step == "movie_publish_failed"
+            assert run.error_message == "poster_download_failed"
+
     def test_write_tools_registered_with_correct_permission(self):
         from media_pilot.agent.tools.base import PermissionLevel
         from media_pilot.agent.tools.registry import get_tool_registry, register_builtin_tools

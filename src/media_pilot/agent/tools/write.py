@@ -149,8 +149,10 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
         execute_movie_write,
     )
     from media_pilot.repository.repositories import (
+        AgentRunRepository,
         IngestTaskRepository,
         MetadataDetailRepository,
+        WriteResultRepository,
     )
     from media_pilot.services.auto_ingest import check_eligibility
     from media_pilot.services.publish_plan_draft import _orm_detail_to_adapter
@@ -237,6 +239,24 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
     task = task_repo.get(task_id)
     if task is None:
         return ToolResult(status="failure", summary=f"Task {task_id} not found")
+
+    def _mark_publish_failed(reason: str) -> None:
+        task_repo.update_status(
+            task,
+            status="agent_failed",
+            current_step="agent_failed",
+            failure_reason=reason,
+        )
+        if context.run_id:
+            run = AgentRunRepository(context.session).get(context.run_id)
+            if run is not None:
+                AgentRunRepository(context.session).update_status(
+                    run,
+                    status="failed",
+                    current_step="movie_publish_failed",
+                    error_message=reason,
+                )
+        context.session.flush()
 
     if task.status == "library_import_complete":
         return ToolResult(
@@ -393,10 +413,12 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
                 provider=orm_detail.provider,
             )
     except Exception as exc:
+        reason = f"movie_publish_failed:{exc}"
+        _mark_publish_failed(reason)
         return ToolResult(
             status="failure",
             summary=f"Movie publish failed: {exc}",
-            data={"error": str(exc)},
+            data={"error": str(exc), "failure_reason": reason},
         )
 
     if write_result.status in ("succeeded", "warning"):
@@ -475,10 +497,21 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
             },
         )
 
+    latest_result = WriteResultRepository(context.session).get_for_task(task_id)
+    failure_reason = None
+    if latest_result is not None and isinstance(latest_result.payload, dict):
+        failure_reason = latest_result.payload.get("failure_reason")
+    reason = failure_reason or f"movie_publish_failed:status={write_result.status}"
+    _mark_publish_failed(reason)
+
     return ToolResult(
         status="failure",
         summary=f"Movie publish failed with status: {write_result.status}",
-        data={"status": write_result.status, "warnings": write_result.warnings},
+        data={
+            "status": write_result.status,
+            "failure_reason": reason,
+            "warnings": write_result.warnings,
+        },
     )
 
 
