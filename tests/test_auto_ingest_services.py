@@ -729,6 +729,91 @@ class TestPersistMetadataSelection:
 
 
 class TestFetchAndSaveMetadataDetail:
+    def test_fetch_metadata_detail_payload_is_pure(self, tmp_path, monkeypatch):
+        from media_pilot.adapters.metadata import (
+            MetadataCredits,
+            MetadataDetail,
+            MetadataExternalIds,
+            MetadataImages,
+        )
+        from media_pilot.services.auto_ingest import (
+            MetadataDetailPayload,
+            fetch_metadata_detail_payload,
+        )
+        from media_pilot.services.metadata_draft import MetadataDraft
+
+        config = _make_config(tmp_path)
+        calls: list[str] = []
+
+        def _fake_fetch_metadata_draft(
+            *,
+            config: object,
+            provider_name: str,
+            provider_id: str,
+            media_type: str,
+            language_priority: list[str],
+        ) -> MetadataDraft:
+            del config, language_priority
+            calls.append("provider_fetch")
+            assert provider_name == "tmdb"
+            assert provider_id == "12345"
+            assert media_type == "movie"
+
+            detail = MetadataDetail(
+                provider="tmdb",
+                provider_id="movie:12345",
+                media_type="movie",
+                title="Test Movie",
+                original_title="",
+                year=2024,
+                plot="some plot",
+                runtime_minutes=120,
+                premiered="2024-01-01",
+                rating=7.1,
+                genres=["Drama"],
+                countries=["US"],
+                studios=["Studio"],
+                credits=MetadataCredits(),
+                external_ids=MetadataExternalIds(imdb_id="tt1234"),
+                images=MetadataImages(None, None, None),
+                payload={"raw": {"origin": "test"}},
+            )
+            return MetadataDraft(
+                detail=detail,
+                directors=[{"name": "Director"}],
+                actors=[{"name": "Actor"}],
+                imdb_id="tt1234",
+                poster_url="https://example.com/poster.jpg",
+                backdrop_url="https://example.com/backdrop.jpg",
+                logo_url="https://example.com/logo.png",
+            )
+
+        class _NoRepository:
+            def __init__(self, *_args, **_kwargs):
+                raise AssertionError("fetch_metadata_detail_payload must not depend on repository")
+
+        monkeypatch.setattr(
+            "media_pilot.services.metadata_draft.fetch_metadata_draft",
+            _fake_fetch_metadata_draft,
+        )
+        monkeypatch.setattr(
+            "media_pilot.repository.repositories.MetadataDetailRepository",
+            _NoRepository,
+        )
+
+        payload = fetch_metadata_detail_payload(
+            config=config,
+            provider_name="tmdb",
+            provider_id="12345",
+            media_type="movie",
+        )
+
+        assert calls == ["provider_fetch"]
+        assert isinstance(payload, MetadataDetailPayload)
+        assert payload.detail.title == "Test Movie"
+        assert payload.payload["directors"] == [{"name": "Director"}]
+        assert payload.payload["imdb_id"] == "tt1234"
+
     def test_unknown_provider_returns_failure(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
 
@@ -747,6 +832,104 @@ class TestFetchAndSaveMetadataDetail:
             )
             assert result.status == "failure"
             assert "Invalid provider" in result.summary or "unknown" in result.summary.lower()
+
+    def test_fetch_and_save_metadata_detail_fetches_before_db_save(self, tmp_path, monkeypatch):
+        from media_pilot.adapters.metadata import (
+            MetadataCredits,
+            MetadataDetail,
+            MetadataExternalIds,
+            MetadataImages,
+        )
+        from media_pilot.services.auto_ingest import (
+            MetadataDetailPayload,
+            fetch_and_save_metadata_detail,
+        )
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+
+        with sf() as session:
+            task = _make_task(session)
+            task_id = task.id
+
+        calls: list[str] = []
+        detail = MetadataDetail(
+            provider="tmdb",
+            provider_id="movie:12345",
+            media_type="movie",
+            title="Test Movie",
+            original_title="",
+            year=2024,
+            plot="some plot",
+            runtime_minutes=120,
+            premiered="2024-01-01",
+            rating=7.1,
+            genres=["Drama"],
+            countries=["US"],
+            studios=["Studio"],
+            credits=MetadataCredits(),
+            external_ids=MetadataExternalIds(imdb_id="tt1234"),
+            images=MetadataImages(None, None, None),
+            payload={"raw": {}},
+        )
+
+        fake_payload = MetadataDetailPayload(
+            detail=detail,
+            payload={
+                "title": detail.title,
+                "directors": [{"name": "Director"}],
+                "actors": [{"name": "Actor"}],
+                "imdb_id": "tt1234",
+                "poster_url": "poster.jpg",
+                "backdrop_url": "backdrop.jpg",
+                "logo_url": "logo.png",
+                "raw": {},
+            },
+        )
+
+        def _fake_payload_fetch(
+            *,
+            config: object,
+            provider_name: str,
+            provider_id: str,
+            media_type: str,
+        ) -> MetadataDetailPayload:
+            del config
+            calls.append("fetch_payload")
+            assert provider_name == "tmdb"
+            assert provider_id == "12345"
+            assert media_type == "movie"
+            return fake_payload
+
+        class _TrackingRepo:
+            def __init__(self, *_args, **_kwargs):
+                calls.append("repo_init")
+
+            def save(self, *args: object, **_kwargs: object):
+                calls.append("repo_save")
+
+        monkeypatch.setattr(
+            "media_pilot.services.auto_ingest.fetch_metadata_detail_payload",
+            _fake_payload_fetch,
+        )
+        monkeypatch.setattr(
+            "media_pilot.repository.repositories.MetadataDetailRepository",
+            _TrackingRepo,
+        )
+
+        with sf() as session:
+            result = fetch_and_save_metadata_detail(
+                session=session,
+                config=config,
+                task_id=task_id,
+                provider_name="tmdb",
+                provider_id="12345",
+                media_type="movie",
+            )
+
+        assert result.status == "success"
+        assert calls == ["fetch_payload", "repo_init", "repo_save"]
 
 
 # ── fetch_metadata_draft: TMDB provider_id 归一化 (Warcraft 现场) ─────

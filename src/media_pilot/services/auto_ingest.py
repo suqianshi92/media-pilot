@@ -11,6 +11,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from media_pilot.adapters.metadata import MetadataDetail
 from media_pilot.config import AppConfig
 from media_pilot.orchestration.auto_confirmation import has_clear_winner, pick_best_candidate
 from media_pilot.services.task_input_analysis import (
@@ -461,6 +462,48 @@ class FetchAndSaveDetailResult:
     year: int | None = None
 
 
+@dataclass(frozen=True, kw_only=True)
+class MetadataDetailPayload:
+    detail: MetadataDetail
+    payload: dict
+
+
+def fetch_metadata_detail_payload(
+    *,
+    config: AppConfig,
+    provider_name: str,
+    provider_id: str,
+    media_type: str,
+) -> MetadataDetailPayload:
+    """Fetch metadata draft from provider and build a flattened save payload.
+
+    Pure fetch helper, no DB session argument.
+    """
+    from dataclasses import asdict
+
+    from media_pilot.services.metadata_draft import fetch_metadata_draft
+
+    language = list(config.tmdb_language_priority)
+    draft = fetch_metadata_draft(
+        config=config,
+        provider_name=provider_name,
+        provider_id=provider_id,
+        media_type=media_type,
+        language_priority=language,
+    )
+
+    detail = draft.detail
+    payload = asdict(detail)
+    payload["directors"] = draft.directors
+    payload["actors"] = draft.actors
+    payload["imdb_id"] = draft.imdb_id
+    payload["poster_url"] = draft.poster_url
+    payload["backdrop_url"] = draft.backdrop_url
+    payload["logo_url"] = draft.logo_url
+
+    return MetadataDetailPayload(detail=detail, payload=payload)
+
+
 def fetch_and_save_metadata_detail(
     *,
     session: Session,
@@ -475,23 +518,17 @@ def fetch_and_save_metadata_detail(
     Reuses ``fetch_metadata_draft`` for the provider call and
     ``MetadataDetailRepository.save`` for persistence.
     """
-    from dataclasses import asdict
-
     from media_pilot.repository.repositories import MetadataDetailRepository
     from media_pilot.services.metadata_draft import (
         ProviderError,
-        fetch_metadata_draft,
     )
 
-    language = list(config.tmdb_language_priority)
-
     try:
-        draft = fetch_metadata_draft(
+        draft_payload = fetch_metadata_detail_payload(
             config=config,
             provider_name=provider_name,
             provider_id=provider_id,
             media_type=media_type,
-            language_priority=language,
         )
     except ValueError as exc:
         return FetchAndSaveDetailResult(
@@ -513,16 +550,7 @@ def fetch_and_save_metadata_detail(
             provider_id=provider_id,
         )
 
-    detail = draft.detail
-
-    # Merge supplementary data into the detail payload
-    payload = asdict(detail)
-    payload["directors"] = draft.directors
-    payload["actors"] = draft.actors
-    payload["imdb_id"] = draft.imdb_id
-    payload["poster_url"] = draft.poster_url
-    payload["backdrop_url"] = draft.backdrop_url
-    payload["logo_url"] = draft.logo_url
+    detail = draft_payload.detail
 
     repo = MetadataDetailRepository(session)
     repo.save(
@@ -533,7 +561,7 @@ def fetch_and_save_metadata_detail(
         title=detail.title,
         original_title=detail.original_title,
         year=detail.year,
-        payload=payload,
+        payload=draft_payload.payload,
     )
     session.flush()
 
