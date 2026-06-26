@@ -71,6 +71,63 @@ def test_build_movie_write_plan_matches_expected_chinese_movie_layout(tmp_path: 
     assert plan.clearlogo_path == plan.target_dir / "飞驰人生2 (2024)-clearlogo.png"
 
 
+def test_build_movie_write_plan_uses_identifier_for_long_adult_title(tmp_path: Path) -> None:
+    detail = MetadataDetail(
+        **{
+            **make_detail().__dict__,
+            "title": (
+                "MDTM-547: I Didn't Cum! That's What She's Saying, but You're "
+                "Listening in Binaural Audio Fidelity, So You Know That She's "
+                "Feeling Good!! She's Trying to Breathe Deep to Prevent Herself "
+                "From Cumming and She's Panting and Moaning to Orgasmic Ecstasy in"
+            ),
+            "original_title": "MDTM-547",
+            "year": 2019,
+            "payload": {"external_id": "MDTM-547"},
+        }
+    )
+    source_path = tmp_path / "MDTM-547-C.mp4"
+
+    plan = build_movie_write_plan(
+        movies_dir=tmp_path / "adult",
+        source_path=source_path,
+        detail=detail,
+        task_id="task-long-title",
+        provider="tpdb",
+    )
+
+    assert plan.final_target_dir == tmp_path / "adult" / "MDTM-547 (2019)"
+    assert plan.final_target_file.name == "MDTM-547 (2019).mp4"
+    for component in (plan.final_target_dir.name, plan.final_target_file.name):
+        assert len(component.encode("utf-8")) <= 180
+    assert detect_movie_write_conflict(plan) is None
+
+
+def test_build_movie_write_plan_truncates_long_regular_title(tmp_path: Path) -> None:
+    long_title = "A Very Long Movie Title " * 20
+    detail = MetadataDetail(
+        **{
+            **make_detail().__dict__,
+            "title": long_title,
+            "year": 2026,
+        }
+    )
+    source_path = tmp_path / "Long.Movie.2026.2160p.WEB-DL.mkv"
+
+    plan = build_movie_write_plan(
+        movies_dir=tmp_path / "movies",
+        source_path=source_path,
+        detail=detail,
+        task_id="task-long-regular",
+    )
+
+    assert plan.final_target_dir.name.endswith("(2026)")
+    assert "..." in plan.final_target_dir.name
+    assert len(plan.final_target_dir.name.encode("utf-8")) <= 180
+    assert len(plan.final_target_file.name.encode("utf-8")) <= 180
+    assert plan.final_target_file.name.endswith(".mkv")
+
+
 def test_build_movie_write_plan_uses_hidden_staging_directory(tmp_path: Path) -> None:
     detail = make_detail()
     source_path = tmp_path / "downloads" / "Example.Movie.2026.1080p.BluRay.mkv"

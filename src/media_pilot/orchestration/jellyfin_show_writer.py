@@ -10,6 +10,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from media_pilot.adapters.metadata import MetadataDetail
+from media_pilot.orchestration.safe_naming import safe_file_stem, title_year_component
 from media_pilot.orchestration.staging_cleanup import cleanup_empty_staging_task_dir
 from media_pilot.repository.audit import record_file_operation, record_generated_file_operation
 from media_pilot.repository.models import FileAsset
@@ -45,7 +46,7 @@ class ShowWritePlanDraft:
     def episode_nfo_paths(self) -> dict[int, Path]:
         """episode number → episode.nfo path"""
         return {
-            ep.episode: ep.target_file.parent / f"{self.show_dir_name} - S{ep.season:02d}E{ep.episode:02d}.nfo"
+            ep.episode: ep.target_file.with_suffix(".nfo")
             for ep in self.episodes
         }
 
@@ -77,7 +78,8 @@ def build_show_write_plan(
 
     episode_targets: list[EpisodeTarget] = []
     for ep in episodes:
-        file_stem = f"{show_dir_name} - S{ep.season:02d}E{ep.episode:02d}"
+        raw_file_stem = f"{show_dir_name} - S{ep.season:02d}E{ep.episode:02d}"
+        file_stem = safe_file_stem(raw_file_stem, extension=ep.source_file.suffix)
         target_file = target_dir / f"{file_stem}{ep.source_file.suffix}"
         episode_targets.append(EpisodeTarget(
             episode=ep.episode,
@@ -155,6 +157,7 @@ def _final_episode_target_file(
         f"{plan.show_dir_name} - "
         f"S{ep.season:02d}E{ep.episode:02d}"
     )
+    file_stem = safe_file_stem(file_stem, extension=ep.source_file.suffix)
     return plan.final_target_dir / f"{file_stem}{ep.source_file.suffix}"
 
 
@@ -481,9 +484,7 @@ def render_episode_nfo(
 
 
 def _show_directory_name(title: str, year: int | None) -> str:
-    if year is None:
-        return title
-    return f"{title} ({year})"
+    return title_year_component(title, year)
 
 
 def _copy_video_to_staging(source_path: Path, target_path: Path) -> int:

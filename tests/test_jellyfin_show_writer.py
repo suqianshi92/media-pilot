@@ -114,6 +114,37 @@ def test_build_show_write_plan_episode_target_files_with_correct_suffix(tmp_path
     assert ep.target_file.suffix == ".mp4"
 
 
+def test_build_show_write_plan_truncates_long_show_title(tmp_path: Path) -> None:
+    detail = MetadataDetail(
+        **{
+            **make_show_detail().__dict__,
+            "title": "A Very Long Show Title " * 20,
+            "year": 2026,
+        }
+    )
+    episodes = [
+        EpisodeTarget(
+            episode=1,
+            season=1,
+            source_file=tmp_path / "Show.S01E01.2160p.WEB-DL.mkv",
+            target_file=Path(""),
+        ),
+    ]
+
+    plan = build_show_write_plan(
+        shows_dir=tmp_path / "shows",
+        episodes=episodes,
+        detail=detail,
+        task_id="task-long-show",
+    )
+
+    assert plan.show_dir_name.endswith("(2026)")
+    assert "..." in plan.show_dir_name
+    assert len(plan.show_dir_name.encode("utf-8")) <= 180
+    assert len(plan.episodes[0].target_file.name.encode("utf-8")) <= 180
+    assert plan.episode_nfo_paths[1] == plan.episodes[0].target_file.with_suffix(".nfo")
+
+
 # ── render_tvshow_nfo ──
 
 def test_render_tvshow_nfo_includes_media_pilot_signature_and_basic_fields() -> None:

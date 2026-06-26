@@ -10,6 +10,11 @@ import httpx
 from sqlalchemy.orm import Session
 
 from media_pilot.adapters.metadata import MetadataDetail
+from media_pilot.orchestration.safe_naming import (
+    movie_directory_name,
+    movie_path_identifier,
+    safe_file_stem,
+)
 from media_pilot.orchestration.staging_cleanup import cleanup_empty_staging_task_dir
 from media_pilot.repository.audit import record_file_operation, record_generated_file_operation
 from media_pilot.repository.models import FileAsset
@@ -70,8 +75,15 @@ def build_movie_write_plan(
         f"build_movie_write_plan 收到目录路径, 应通过 "
         f"services/video_source_resolver.py 解析为文件: {source_path}"
     )
+    path_identifier = identifier or movie_path_identifier(
+        provider=provider,
+        title=detail.title,
+        original_title=detail.original_title,
+        provider_id=detail.provider_id,
+        payload=detail.payload,
+    )
     directory_name = _movie_directory_name(
-        detail.title, detail.year, identifier=identifier,
+        detail.title, detail.year, identifier=path_identifier,
     )
     quality_suffix = _quality_suffix_from_source_name(
         source_stem=source_path.stem,
@@ -80,7 +92,8 @@ def build_movie_write_plan(
     )
     target_dir = movies_dir / ".media-pilot-staging" / task_id / directory_name
     final_target_dir = movies_dir / directory_name
-    file_stem = directory_name if quality_suffix == "" else f"{directory_name} - {quality_suffix}"
+    raw_file_stem = directory_name if quality_suffix == "" else f"{directory_name} - {quality_suffix}"
+    file_stem = safe_file_stem(raw_file_stem, extension=source_path.suffix)
     target_file = target_dir / f"{file_stem}{source_path.suffix}"
     final_target_file = final_target_dir / f"{file_stem}{source_path.suffix}"
     nfo_path = target_dir / f"{directory_name}.nfo"
@@ -528,13 +541,7 @@ def render_movie_nfo(
 def _movie_directory_name(
     title: str, year: int | None, *, identifier: str | None = None
 ) -> str:
-    if identifier:
-        base = f"{identifier} - {title}"
-    else:
-        base = title
-    if year is None:
-        return base
-    return f"{base} ({year})"
+    return movie_directory_name(title, year, identifier=identifier)
 
 
 def _quality_suffix_from_source_name(
