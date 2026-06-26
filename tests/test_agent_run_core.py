@@ -70,6 +70,61 @@ class TestAgentLLMClient:
         assert str(client._client.base_url).rstrip("/") == "https://test.example.com/v1"
 
 
+class TestAgentRunTransactionBoundaries:
+    def test_initial_progress_is_committed_before_llm_call(self, tmp_path):
+        """LLM 网络等待前, run/message/task 初始写入必须已提交可见。"""
+        from media_pilot.agent.runner import run_agent_turn
+        from media_pilot.repository.database import create_session_factory, initialize_database
+        from media_pilot.repository.repositories import (
+            AgentMessageRepository,
+            AgentRunRepository,
+            IngestTaskRepository,
+        )
+
+        config = _make_config(tmp_path)
+        initialize_database(config)
+        session_factory = create_session_factory(config)
+
+        with session_factory() as session:
+            task = _make_task(session)
+            task_id = task.id
+
+        observations: dict[str, object] = {}
+
+        class InspectingLLM(MockLLMClient):
+            def chat(self, messages, tools=None):
+                with session_factory() as verify_session:
+                    task_db = IngestTaskRepository(verify_session).get(task_id)
+                    runs = AgentRunRepository(verify_session).list_by_task(task_id)
+                    run = runs[0]
+                    messages_db = AgentMessageRepository(
+                        verify_session
+                    ).list_by_run(run.id)
+                    observations["task_status"] = task_db.status
+                    observations["run_status"] = run.status
+                    observations["message_count"] = len(messages_db)
+                return super().chat(messages, tools)
+
+        mock = InspectingLLM()
+        mock.add_text_response("Done.")
+
+        with session_factory() as session:
+            result = run_agent_turn(
+                session=session,
+                config=config,
+                task_id=task_id,
+                mock_llm_client=mock,
+            )
+            session.commit()
+
+        assert result.status == "completed"
+        assert observations == {
+            "task_status": "agent_running",
+            "run_status": "active",
+            "message_count": 1,
+        }
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Tool Schema
 # ══════════════════════════════════════════════════════════════════════

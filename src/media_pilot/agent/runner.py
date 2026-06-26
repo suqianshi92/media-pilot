@@ -44,6 +44,32 @@ TOOL_OUTPUT_LIST_MAX_ITEMS = 10
 TOOL_OUTPUT_PAYLOAD_MAX = 320
 
 
+def _commit_before_llm_call(session: Session, *, run_id: str, step: int) -> None:
+    """Commit pending Agent progress before waiting on an LLM network call.
+
+    SQLite only allows one writer at a time. The runner creates messages,
+    tool-call rows, and task/run status updates before each model call; keeping
+    those writes uncommitted while the LLM request is in flight turns a network
+    wait into a long SQLite write transaction. Commit here to make the model
+    call happen outside a write transaction.
+    """
+    try:
+        session.commit()
+    except OperationalError:
+        logger.warning(
+            "Agent run %s step %s commit-before-LLM hit OperationalError",
+            run_id, step,
+        )
+        try:
+            session.rollback()
+        except Exception:
+            logger.exception(
+                "Agent run %s rollback failed after commit-before-LLM",
+                run_id,
+            )
+        raise
+
+
 def _tool_output_for_llm(
     output: dict | None,
     tool_name: str | None = None,
@@ -624,10 +650,16 @@ def _run_agent_loop(
             # no_videos / unsafe_path / scan_failed) 不得被下一轮重置为
             # active — 这会让 final text 路径再覆盖一次, 任务从 agent_failed
             # 看似变回成功. 保留 failed 状态直到 final text 收口.
-            if run.status != "failed":
+            #
+            # 已经是 active 的 run 不再每轮强行写 step_N: 诊断字段不值得
+            # 为每次 LLM 调用制造一次 UPDATE/flush 写锁. 从 waiting_user
+            # 恢复时仍需切 active, 然后在 LLM 调用前提交释放写事务.
+            if run.status not in ("failed", "active"):
                 run_repo.update_status(
                     run, status="active", current_step=f"step_{step}",
                 )
+
+            _commit_before_llm_call(session, run_id=run.id, step=step)
 
             # Build messages for LLM
             history = msg_repo.list_by_run(run.id)

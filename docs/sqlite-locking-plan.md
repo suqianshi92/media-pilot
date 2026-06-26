@@ -41,11 +41,17 @@ Worker 对 `discovered` / `created` / `queued` 任务只做以下短事务：
 
 ## 后续阶段
 
-阶段 2 再考虑拆分 Agent loop 内部事务：
+阶段 2 先处理 Agent loop 里最明显的长事务点：
 
-- LLM 调用前不持有未提交写事务。
-- tool call 输入/输出记录尽快提交。
-- 复杂写工具内部按短事务落库。
+- LLM 调用前提交已产生的 run/message/task 进度，让网络等待不持有
+  SQLite 写事务。
+- 已是 `active` 的 run 不再每轮写 `step_N`。这个诊断字段不值得为每次
+  LLM 调用制造一次 `UPDATE` 和 `flush`。
+- 从 `waiting_user` 恢复时仍会切回 `active`，并在 LLM 调用前提交。
+
+本阶段仍不拆复杂写工具内部事务。发布文件、写 FileAsset、WriteResult、
+源文件清理这些操作涉及文件系统副作用，后续需要单独按工具审查，不能为了
+减少锁盲目拆开。
 
 阶段 3 再考虑 operation-level retry：
 
