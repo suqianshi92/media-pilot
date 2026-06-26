@@ -14,9 +14,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 
 from media_pilot.app import create_app
 from media_pilot.config.settings import AppConfig
@@ -386,6 +390,49 @@ class TestUpdateSettingsAdultGate:
             f"两个条件都满足时启用 tpdb_adult_movie 应成功, got: {body!r}"
         )
         assert "tpdb_adult_movie" in body["data"]["enabled_metadata_profiles"]
+
+    def test_update_settings_db_locked_returns_json_409(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """SQLite 写锁冲突必须返回 JSON 409, 不得泄漏 500 plaintext."""
+        config = _make_config(tmp_path, with_tpdb_key=True, with_adult_dir=True)
+        for d in (
+            config.downloads_dir, config.watch_dir, config.workspace_dir,
+            config.movies_dir, config.shows_dir, config.database_dir,
+        ):
+            d.mkdir(parents=True, exist_ok=True)
+        initialize_database(config)
+        session_factory = create_session_factory(config)
+
+        from media_pilot.services.app_settings import AppSettingsService
+
+        def _raise_db_locked(self, settings):
+            raise OperationalError("UPDATE app_settings", {}, Exception("database is locked"))
+
+        monkeypatch.setattr(AppSettingsService, "save", _raise_db_locked)
+
+        from media_pilot.api.settings_dtos import AppSettingsUpdateRequest
+        from media_pilot.api.settings_routes import update_settings
+
+        resp = update_settings(
+            AppSettingsUpdateRequest(metadata_auto_confirm_confidence=0.85),
+            SimpleNamespace(
+                app=SimpleNamespace(
+                    state=SimpleNamespace(
+                        session_factory=session_factory,
+                        config=config,
+                    )
+                )
+            ),  # type: ignore[arg-type]
+        )
+
+        assert isinstance(resp, JSONResponse)
+        assert resp.status_code == 409
+
+        body = json.loads(resp.body)
+        assert body["status"] == "error"
+        assert body["messages"][0]["code"] == "db_locked"
+        assert body["meta"]["retryable"] is True
 
     def test_get_settings_reports_tpdb_adult_unsupported_when_adult_dir_missing(
         self, tmp_path: Path,

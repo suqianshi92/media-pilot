@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_pilot.orchestration.db_retry import safe_commit
 from media_pilot.repository.models import AppSetting
 
 
@@ -131,7 +132,7 @@ class AppSettingsService:
             record.upload_rate_limit_bytes_per_second = (
                 settings.upload_rate_limit_bytes_per_second
             )
-            session.commit()
+            safe_commit(session)
 
     def mark_download_rate_limits_synced(
         self,
@@ -148,7 +149,7 @@ class AppSettingsService:
             record.synced_upload_rate_limit_bytes_per_second = (
                 upload_rate_limit_bytes_per_second
             )
-            session.commit()
+            safe_commit(session)
 
     def _validate(self, settings: AppSettings) -> None:
         """校验应用配置：拒绝不支持的档案/格式、拒绝越界数值"""
@@ -199,5 +200,5 @@ class AppSettingsService:
         if record is None:
             record = AppSetting()
             session.add(record)
-            session.commit()
+            safe_commit(session)
         return record

@@ -6,6 +6,8 @@ import os
 import time
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
@@ -121,6 +123,22 @@ def _build_format_options(settings: AppSettings) -> list[LibraryFormatOption]:
             enabled="jellyfin" in enabled,
         ),
     ]
+
+
+def _db_locked_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content=ApiEnvelope(
+            status="error",
+            data={},
+            messages=[ApiMessage(
+                level="error",
+                code="db_locked",
+                text="数据库暂时被占用，请稍后重试",
+            )],
+            meta={"retryable": True},
+        ).model_dump(),
+    )
 
 
 @router.get("/settings")
@@ -301,6 +319,8 @@ def update_settings(
             )],
             meta={},
         )
+    except OperationalError:
+        return _db_locked_response()
 
     saved = service.read()
     messages = [ApiMessage(level="info", code="settings_updated", text="配置已保存")]
