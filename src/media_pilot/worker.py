@@ -162,17 +162,17 @@ class Worker:
             if active_runs:
                 return ProcessTaskResult(status="agent_running")
 
-        # Launch Agent run in auto_ingest mode
+        # Launch Agent run in auto_ingest mode. This intentionally uses the
+        # ack-only path so Worker does not hold a DB transaction across LLM
+        # calls, tool execution, or file publishing.
         try:
-            with session_factory() as session:
-                from media_pilot.agent.runner import run_agent_turn
-                result = run_agent_turn(
-                    session=session,
-                    config=config,
-                    task_id=task.id,
-                    mode="auto_ingest",
-                )
-                session.commit()
+            from media_pilot.agent.runner import run_agent_turn_async
+            run_agent_turn_async(
+                session_factory=session_factory,
+                config=config,
+                task_id=task.id,
+                mode="auto_ingest",
+            )
         except OperationalError as exc:
             # DB locked 是瞬时错误, 不应把任务标记为 agent_failed.
             # 任务状态保持 discovered/created/queued, 下一轮 processor 会重试.
@@ -186,13 +186,7 @@ class Worker:
         except Exception:
             return ProcessTaskResult(status="agent_failed")
 
-        if result.status == "completed":
-            return ProcessTaskResult(status="agent_completed")
-        if result.status == "waiting_user":
-            return ProcessTaskResult(status="waiting_user")
-        if result.status == "failed":
-            return ProcessTaskResult(status="agent_failed")
-        return ProcessTaskResult(status=result.status)
+        return ProcessTaskResult(status="agent_started")
 
     def sync_downloads(
         self, session_factory: sessionmaker[Session]

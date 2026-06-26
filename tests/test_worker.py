@@ -493,9 +493,14 @@ class TestWorkerAgentOrchestration:
             session.commit()
             task_id = task.id
 
-        # With real LLM config but no real endpoint, Agent will fail
+        # Worker only starts the Agent in a short transaction; the background
+        # loop settles success/failure later.
         result = Worker(config).process_task(session_factory, task_id)
-        assert result.status in ("agent_failed", "agent_completed", "waiting_user")
+        assert result.status == "agent_started"
+
+        with session_factory() as session:
+            loaded_task = IngestTaskRepository(session).get(task_id)
+        assert loaded_task.status == "agent_running"
 
     def test_discovered_task_starts_agent_run(self, tmp_path, monkeypatch):
         """Discovered task should create an AgentRun via auto_ingest mode."""
@@ -689,23 +694,33 @@ class TestWorkerAgentIntegration:
             "Task analyzed. Metadata persisted. Ready for detail fetch and publish."
         )
 
-        # Patch run_agent_turn to inject mock LLM
+        # Patch async entrypoint to inject mock LLM while keeping Worker return
+        # semantics as "started", not "completed".
         import media_pilot.agent.runner as runner_mod
+        from types import SimpleNamespace
 
-        def patched_run_agent_turn(*, session, config, task_id, mode="default",
-                                    mock_llm_client=None, initial_message=None):
-            return orig_run_agent_turn(
-                session=session, config=config, task_id=task_id,
-                mode=mode, mock_llm_client=mock,
-                initial_message=initial_message,
+        def patched_run_agent_turn_async(*, session_factory, config, task_id,
+                                          mode="auto_ingest", initial_message=None,
+                                          mock_llm_client=None):
+            with session_factory() as session:
+                run_result = orig_run_agent_turn(
+                    session=session, config=config, task_id=task_id,
+                    mode=mode, mock_llm_client=mock,
+                    initial_message=initial_message,
+                )
+                session.commit()
+            return SimpleNamespace(
+                run_id=run_result.run_id, status="active", thread=None,
             )
 
-        monkeypatch.setattr(runner_mod, "run_agent_turn", patched_run_agent_turn)
+        monkeypatch.setattr(
+            runner_mod, "run_agent_turn_async", patched_run_agent_turn_async,
+        )
 
         result = Worker(config).process_task(session_factory, task_id)
 
-        # Safety net intervened and marked the run failed, so Worker reports agent_failed.
-        assert result.status == "agent_failed"
+        # Worker reports only that the background Agent was started.
+        assert result.status == "agent_started"
 
         with session_factory() as session:
             from media_pilot.repository.repositories import (
@@ -881,19 +896,29 @@ class TestWorkerAgentIntegration:
 
         import media_pilot.agent.runner as runner_mod
 
-        def patched_run_agent_turn(*, session, config, task_id, mode="default",
-                                    mock_llm_client=None, initial_message=None):
-            return orig_run_agent_turn(
-                session=session, config=config, task_id=task_id,
-                mode=mode, mock_llm_client=mock,
-                initial_message=initial_message,
+        from types import SimpleNamespace
+
+        def patched_run_agent_turn_async(*, session_factory, config, task_id,
+                                          mode="auto_ingest", initial_message=None,
+                                          mock_llm_client=None):
+            with session_factory() as session:
+                run_result = orig_run_agent_turn(
+                    session=session, config=config, task_id=task_id,
+                    mode=mode, mock_llm_client=mock,
+                    initial_message=initial_message,
+                )
+                session.commit()
+            return SimpleNamespace(
+                run_id=run_result.run_id, status="active", thread=None,
             )
 
-        monkeypatch.setattr(runner_mod, "run_agent_turn", patched_run_agent_turn)
+        monkeypatch.setattr(
+            runner_mod, "run_agent_turn_async", patched_run_agent_turn_async,
+        )
 
         result = Worker(config).process_task(session_factory, task_id)
 
-        assert result.status == "agent_completed"
+        assert result.status == "agent_started"
 
         # ── Verify task state, file assets, and operation records ──
         with session_factory() as session:

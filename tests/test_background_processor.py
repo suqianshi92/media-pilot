@@ -47,9 +47,8 @@ def make_config(root: Path) -> AppConfig:
 def test_background_processor_run_once_creates_and_processes_task(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """scan_once 创建一个 discovered 任务, run_once 通过 Agent mock 处理。"""
+    """scan_once 创建任务后, run_once 只短事务启动后台 Agent。"""
     import media_pilot.agent.runner as runner_mod
-    from media_pilot.agent.runner import AgentRunResult
 
     config = make_config(tmp_path)
     source_path = config.watch_dir / "Example.Movie.2026.1080p.mkv"
@@ -57,30 +56,33 @@ def test_background_processor_run_once_creates_and_processes_task(
     initialize_database(config)
     session_factory = create_session_factory(config)
 
-    def mock_run_agent_turn(*, session, config, task_id, mode="default",
-                            mock_llm_client=None, initial_message=None):
-        return AgentRunResult(
-            run_id="mock-run", status="completed",
-            message_count=1, tool_call_count=0,
-        )
+    call_log: list[str] = []
 
-    monkeypatch.setattr(runner_mod, "run_agent_turn", mock_run_agent_turn)
+    def mock_run_agent_turn_async(*, session_factory, config, task_id,
+                                  mode="auto_ingest", initial_message=None,
+                                  mock_llm_client=None):
+        call_log.append(task_id)
+        return _create_mock_agent_ack(session_factory, task_id)
+
+    monkeypatch.setattr(
+        runner_mod, "run_agent_turn_async", mock_run_agent_turn_async,
+    )
 
     from media_pilot.orchestration.background_processor import BackgroundProcessor
 
     worker = Worker(config)
     processor = BackgroundProcessor(worker)
     # make_config 默认 watch_stable_window_seconds=0 (稳定窗口关闭), 本轮
-    # run_once 应同时完成 watch 扫描建任务与 auto_ingest Agent 处理.
+    # run_once 应创建任务并启动 Agent, 不再同步等待 Agent 完成.
     result = processor.run_once(session_factory)
 
-    # 扫描创建了 1 个新任务, 且本轮已由 Agent 处理完成
     assert result.scanned > 0
     assert result.pending >= 0
     assert result.failed == 0
     assert result.errors == []
-    # 任务应已完成处理
-    assert result.succeeded > 0
+    assert result.succeeded == 0
+    assert result.skipped > 0
+    assert len(call_log) == 1
 
 
 def test_background_processor_skips_when_worker_disabled(tmp_path: Path) -> None:
@@ -143,27 +145,59 @@ def test_background_processor_skips_when_llm_missing(tmp_path: Path) -> None:
 # ── 双入口集成回归 — managed download + watch ──
 
 
-def _stub_agent_completed(monkeypatch):
-    """把 run_agent_turn 替成返回 completed 的桩."""
+def _create_mock_agent_ack(session_factory, task_id: str):
+    from types import SimpleNamespace
+
+    from media_pilot.repository.repositories import (
+        AgentMessageCreate,
+        AgentMessageRepository,
+        AgentRunCreate,
+        AgentRunRepository,
+        IngestTaskRepository,
+    )
+
+    with session_factory() as session:
+        run_repo = AgentRunRepository(session)
+        msg_repo = AgentMessageRepository(session)
+        task_repo = IngestTaskRepository(session)
+        task = task_repo.get(task_id)
+        run = run_repo.create(AgentRunCreate(
+            task_id=task_id, current_step="agent_start",
+        ))
+        msg_repo.create(AgentMessageCreate(
+            run_id=run.id, role="user", content=f"mock start {task_id}",
+        ))
+        if task is not None:
+            task_repo.update_status(
+                task, status="agent_running", current_step="agent_running",
+            )
+        session.commit()
+
+    return SimpleNamespace(run_id=run.id, status="active", thread=None)
+
+
+def _stub_agent_started(monkeypatch, call_log: list[str] | None = None):
+    """把 run_agent_turn_async 替成只执行同步 ack 阶段的桩."""
     import media_pilot.agent.runner as runner_mod
-    from media_pilot.agent.runner import AgentRunResult
 
-    def mock_run_agent_turn(*, session, config, task_id, mode="default",
-                            mock_llm_client=None, initial_message=None):
-        return AgentRunResult(
-            run_id="mock-run", status="completed",
-            message_count=1, tool_call_count=0,
-        )
+    def mock_run_agent_turn_async(*, session_factory, config, task_id,
+                                  mode="auto_ingest", initial_message=None,
+                                  mock_llm_client=None):
+        if call_log is not None:
+            call_log.append(task_id)
+        return _create_mock_agent_ack(session_factory, task_id)
 
-    monkeypatch.setattr(runner_mod, "run_agent_turn", mock_run_agent_turn)
+    monkeypatch.setattr(
+        runner_mod, "run_agent_turn_async", mock_run_agent_turn_async,
+    )
 
 
 def test_watch_import_creates_ingest_and_runs_agent(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """watch 外部导入 → 入库任务 → auto_ingest Agent 自动启动并完成."""
+    """watch 外部导入 → 入库任务 → auto_ingest Agent 后台启动。"""
 
-    _stub_agent_completed(monkeypatch)
+    _stub_agent_started(monkeypatch)
     config = make_config(tmp_path)
     (config.watch_dir / "External.Movie.2026.mkv").write_bytes(b"movie")
     initialize_database(config)
@@ -174,12 +208,13 @@ def test_watch_import_creates_ingest_and_runs_agent(
     status = BackgroundStatusService()
     processor = BackgroundProcessor(Worker(config), status_service=status)
     # make_config 默认 watch_stable_window_seconds=0 (稳定窗口关闭), 本轮
-    # run_once 应同时完成 watch 扫描建任务与 auto_ingest Agent 处理.
+    # run_once 应创建任务并启动 auto_ingest Agent.
     result = processor.run_once(session_factory)
 
     assert result.scanned == 1
-    assert result.succeeded == 1
-    # 历史记录应包含 watch 扫描新建任务 + 处理完成两条
+    assert result.succeeded == 0
+    assert result.skipped == 1
+    # 历史记录应包含 watch 扫描新建任务 + Agent 启动两条
     phases = {e.phase for e in status.history_snapshot}
     assert "scanning_watch" in phases
     assert "processing_task" in phases
@@ -190,9 +225,9 @@ def test_watch_import_creates_ingest_and_runs_agent(
 def test_managed_download_creates_ingest_and_runs_agent(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """managed download 完成 → 入库任务 → auto_ingest Agent 自动启动并完成."""
+    """managed download 完成 → 入库任务 → auto_ingest Agent 后台启动."""
 
-    _stub_agent_completed(monkeypatch)
+    _stub_agent_started(monkeypatch)
     config = make_config(tmp_path)
     # 让 watch 目录保持为空, 避免扫描路径额外创建任务.
     initialize_database(config)
@@ -238,8 +273,9 @@ def test_managed_download_creates_ingest_and_runs_agent(
 
     # managed download 路径上: scan_once 不创建新任务; 但 sync_downloads 转入库
     assert result.scanned == 0
-    # 下载同步新建了 1 个入库任务, 后续被 auto_ingest 处理完成
-    assert result.succeeded == 1
+    # 下载同步新建了 1 个入库任务, 后续启动 auto_ingest Agent.
+    assert result.succeeded == 0
+    assert result.skipped == 1
     # 历史应包含下载同步的"系统内下载"摘要
     sync_events = [
         e for e in status.history_snapshot if e.phase == "syncing_downloads"
@@ -252,9 +288,7 @@ def test_managed_download_creates_ingest_and_runs_agent(
         ingest_tasks = session.scalars(select(IngestTask)).all()
     assert len(ingest_tasks) == 1
     assert ingest_tasks[0].source_download_task_id is not None
-    # 注: mocked run_agent_turn 不修改 IngestTask.status, 这里只校验
-    # "managed download → 入库任务" 这条物理链路是否打通. 实际 IngestTask
-    # 状态推进由真实 Agent 路径完成, 已在 test_auto_ingest_services 覆盖.
+    assert ingest_tasks[0].status == "agent_running"
 
 
 def test_waiting_user_does_not_block_other_tasks(
@@ -282,26 +316,20 @@ def test_waiting_user_does_not_block_other_tasks(
         ))
         session.commit()
 
-    # Agent mock: 第一个调用返回 waiting_user(对应 waiting), 第二个返回 completed.
+    # Agent mock: waiting_user 不应被调用; discovered 任务只启动后台 Agent.
     import media_pilot.agent.runner as runner_mod
-    from media_pilot.agent.runner import AgentRunResult
 
     call_log: list[str] = []
 
-    def mock_run_agent_turn(*, session, config, task_id, mode="default",
-                            mock_llm_client=None, initial_message=None):
+    def mock_run_agent_turn_async(*, session_factory, config, task_id,
+                                  mode="auto_ingest", initial_message=None,
+                                  mock_llm_client=None):
         call_log.append(task_id)
-        if task_id == waiting.id:
-            return AgentRunResult(
-                run_id="run-waiting", status="waiting_user",
-                message_count=1, tool_call_count=0,
-            )
-        return AgentRunResult(
-            run_id="run-completed", status="completed",
-            message_count=1, tool_call_count=0,
-        )
+        return _create_mock_agent_ack(session_factory, task_id)
 
-    monkeypatch.setattr(runner_mod, "run_agent_turn", mock_run_agent_turn)
+    monkeypatch.setattr(
+        runner_mod, "run_agent_turn_async", mock_run_agent_turn_async,
+    )
 
     from media_pilot.orchestration.background_processor import BackgroundProcessor
 
@@ -377,7 +405,7 @@ def test_disabled_worker_does_not_emit_history(
 def test_processing_phase_resets_between_tasks(tmp_path: Path, monkeypatch) -> None:
     """phase 在每个任务结束时应清空, 不残留上一个任务的 current_task_id."""
 
-    _stub_agent_completed(monkeypatch)
+    _stub_agent_started(monkeypatch)
     config = make_config(tmp_path)
     (config.watch_dir / "A.mkv").write_bytes(b"a")
     (config.watch_dir / "B.mkv").write_bytes(b"b")

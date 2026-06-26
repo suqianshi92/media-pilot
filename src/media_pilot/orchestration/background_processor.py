@@ -191,6 +191,16 @@ class BackgroundProcessor:
                         summary="任务处理跳过: DB 暂时被占用, 下一轮重试",
                         task_id=task.id,
                     )
+                elif process_result.status == "agent_started":
+                    # Worker 只负责短事务启动 Agent; 实际入库结果由后台
+                    # Agent loop 后续落库, UI/API 通过任务状态轮询观察。
+                    self._status.record_event(
+                        phase="processing_task",
+                        level=HistoryLevel.INFO,
+                        summary="任务已启动 Agent 后台处理",
+                        task_id=task.id,
+                    )
+                    result.skipped += 1
                 elif process_result.status == "waiting_user":
                     # waiting_user 是阻塞态, 但应让其他任务继续; 记录为 info.
                     self._status.record_event(
