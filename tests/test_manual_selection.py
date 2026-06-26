@@ -919,11 +919,15 @@ def test_manual_select_supersedes_pending_decisions_before_publishing(
         decision_id = decision.id
         session.commit()
 
-    monkeypatch.setattr(
-        ms,
-        "_quick_publish",
-        lambda session, config, task_id: ms._PublishOutcome(kind="published"),
-    )
+    def _fake_publish(session, config, task_id):
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        task.status = "library_import_complete"
+        task.current_step = "library_import_complete"
+        session.flush()
+        return ms._PublishOutcome(kind="published")
+
+    monkeypatch.setattr(ms, "_quick_publish", _fake_publish)
 
     with session_factory() as session:
         result = submit_manual_selection(
@@ -948,6 +952,17 @@ def test_manual_select_supersedes_pending_decisions_before_publishing(
             "type": "system",
             "reason": "manual_metadata_selection_override",
         }
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.status == "library_import_complete"
+        assert task.current_step == "library_import_complete"
+        assert task.title == "Test Movie"
+        assert task.year == 2026
+        assert task.media_type == "movie"
+        run = session.scalars(select(AgentRun).where(AgentRun.task_id == task_id)).one()
+        assert run.status == "completed"
+        assert run.current_step == "manual_metadata_published"
+        assert run.error_message is None
 
 
 def test_manual_select_completed_task_revokes_before_republish(

@@ -17,7 +17,7 @@ function renderTaskDetailPage(taskId: string, service: TaskDetailService = creat
     },
   })
 
-  render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`/tasks/${taskId}`]}>
         <Routes>
@@ -192,6 +192,7 @@ describe('TaskDetailPage', () => {
 
   it('calls manualSelect and refreshes task-related queries', async () => {
     const base = createMockTaskService()
+    let finishManualSelect: (() => void) | undefined
     const called = {
       getTaskDetail: 0,
       listAgentMessages: 0,
@@ -225,6 +226,9 @@ describe('TaskDetailPage', () => {
       },
       manualSelect: async (taskId, params) => {
         called.manualSelect += 1
+        await new Promise<void>((resolve) => {
+          finishManualSelect = resolve
+        })
         return base.manualSelect(taskId, params)
       },
     }
@@ -252,6 +256,10 @@ describe('TaskDetailPage', () => {
     await waitFor(() => {
       expect(called.manualSelect).toBe(1)
     })
+    expect(screen.getByText('已提交元数据选择')).toBeInTheDocument()
+    expect(screen.getByText('正在使用 天气之子 继续处理入库。')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '处理中…' }).length).toBeGreaterThan(0)
+    finishManualSelect?.()
     await waitFor(() => {
       expect(called.getTaskDetail).toBeGreaterThan(baseline.getTaskDetail)
       expect(called.listAgentMessages).toBeGreaterThan(baseline.listAgentMessages)
@@ -259,6 +267,52 @@ describe('TaskDetailPage', () => {
       expect(called.listAgentToolCalls).toBeGreaterThan(baseline.listAgentToolCalls)
     })
     expect(await screen.findByText('已选择 天气之子 (tmdb)')).toBeInTheDocument()
+  })
+
+  it('renders poster images for manual metadata research candidates', async () => {
+    const base = createMockTaskService()
+    const customService: TaskDetailService = {
+      ...base,
+      researchCandidates: async () => ({
+        status: 'success',
+        data: {
+          candidates: [
+            {
+              provider: 'tmdb',
+              provider_id: 'movie:poster',
+              title: '带封面的候选',
+              original_title: 'Poster Candidate',
+              year: 2026,
+              media_type: 'movie',
+              confidence: 0.91,
+              match_reason: 'manual_search',
+              risk_flags: [],
+              payload: {},
+              poster_url: 'https://example.test/poster.jpg',
+              overview: '候选简介',
+            },
+          ],
+          search_summary: {
+            keyword: '带封面的候选',
+            scope: 'all',
+            total_candidates: 1,
+            kept_existing_candidates: false,
+            searched_profiles: [],
+          },
+        },
+        messages: [],
+        meta: {},
+      }),
+    }
+
+    const { container } = renderTaskDetailPage('task-multiple-candidates', customService)
+
+    const keywordInput = await screen.findByRole('textbox', { name: '搜索关键词' })
+    fireEvent.change(keywordInput, { target: { value: '带封面的候选' } })
+    fireEvent.click(screen.getByRole('button', { name: '重新搜索' }))
+
+    expect(await screen.findByText('带封面的候选')).toBeInTheDocument()
+    expect(container.querySelector('img[src="https://example.test/poster.jpg"]')).not.toBeNull()
   })
 
   it('disables manual metadata research inputs when agent is running', async () => {

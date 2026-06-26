@@ -1,6 +1,7 @@
 """API v1 合同测试 — 成功 / accepted / 错误 / 分页 / 字段命名"""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -332,14 +333,7 @@ def test_api_v1_research_updates_candidates(tmp_path: Path, monkeypatch) -> None
         tmdb_api_key="test-key",
     )
     initialize_database(config)
-    # 写入持久化应用设置，启用 tmdb_movie profile
-    from media_pilot.repository.models import AppSetting
     sf = create_session_factory(config)
-    with sf() as session:
-        if not session.get(AppSetting, "singleton"):
-            session.add(AppSetting(id="singleton", enabled_metadata_profiles=["tmdb_movie"]))
-            session.commit()
-
     with sf() as session:
         task = IngestTaskRepository(session).create(
             IngestTaskCreate(
@@ -351,22 +345,67 @@ def test_api_v1_research_updates_candidates(tmp_path: Path, monkeypatch) -> None
         session.commit()
         tid = task.id
 
-    from media_pilot.orchestration import profile_search as ps
-    monkeypatch.setattr(
-        ps, "create_metadata_provider_by_name",
-        lambda config_arg, provider_name: _make_stub_correct_movie_provider(),
+    from media_pilot.services import manual_research as mr
+
+    def _fake_manual_research(session, *, task_id, keyword, scope, config):
+        return mr.ManualResearchResult(
+            candidates=[
+                MediaCandidate(
+                    task_id=task_id,
+                    source="stub_metadata",
+                    external_id="movie:correct-movie:2026",
+                    title="Correct Movie",
+                    original_title="Correct Movie",
+                    year=2026,
+                    media_type="movie",
+                    confidence=0.95,
+                    reason="strong_match",
+                    payload={
+                        "overview": "A corrected search result.",
+                        "poster_url": "https://example.test/posters/correct-movie.jpg",
+                    },
+                )
+            ],
+            summary=mr.SearchSummary(
+                keyword=keyword,
+                scope=scope,
+                searched_profiles=[
+                    mr.ProfileSearchStatus(
+                        profile="tmdb_movie",
+                        label="TMDB 电影",
+                        provider="tmdb",
+                        status="succeeded",
+                        candidate_count=1,
+                    )
+                ],
+                total_candidates=1,
+                kept_existing_candidates=False,
+            ),
+        )
+
+    monkeypatch.setattr(mr, "run_manual_research", _fake_manual_research)
+    from media_pilot.api.task_dtos import ResearchKeywordRequest
+    from media_pilot.api.v1 import research_candidates
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(session_factory=sf, config=config)
+        )
     )
-    client = TestClient(create_app(config=config, session_factory=sf))
-    resp = client.post(f"/api/v1/tasks/{tid}/research",
-                       json={"keyword": "Correct Movie 2026"})
-    assert resp.status_code == 200
-    body = resp.json()
+    envelope = research_candidates(
+        tid,
+        ResearchKeywordRequest(keyword="Correct Movie 2026"),
+        request,  # type: ignore[arg-type]
+    )
+    body = envelope.model_dump(mode="json")
     assert body["status"] == "success"
     data = body["data"]
     assert "confirmation_request" not in data
     assert len(data["candidates"]) == 1
     assert data["candidates"][0]["title"] == "Correct Movie"
     assert data["candidates"][0]["year"] == 2026
+    assert data["candidates"][0]["overview"] == "A corrected search result."
+    assert data["candidates"][0]["poster_url"] == "https://example.test/posters/correct-movie.jpg"
     summary = data["search_summary"]
     assert summary["keyword"] == "Correct Movie 2026"
     assert summary["scope"] == "all"

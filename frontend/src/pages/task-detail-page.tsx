@@ -267,6 +267,13 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       original_title: candidate.original_title,
       media_type: candidate.media_type,
     }),
+    onMutate: (candidate) => {
+      setFeedback({
+        variant: 'warning',
+        title: t('taskWorkspace.manualSelectSubmitted'),
+        description: t('taskWorkspace.manualSelectSubmittedDesc', { title: candidate.title }),
+      })
+    },
     onSuccess: async (result) => {
       const status = result.data.status
       const summary = result.data.summary
@@ -423,7 +430,8 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
                       handleSelect(candidate)
                     }}
                   >
-                    {t('taskWorkspace.selectCandidate')}
+                    {manualSelectMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {manualSelectMutation.isPending ? t('taskWorkspace.manualSelectProcessing') : t('taskWorkspace.selectCandidate')}
                   </Button>
                 </MetadataCandidateCard>
               )

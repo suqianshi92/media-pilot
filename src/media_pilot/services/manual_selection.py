@@ -114,6 +114,14 @@ def submit_manual_selection(
             status="saved",
             summary=sel_result.summary,
         )
+    _overwrite_task_metadata_fields(
+        session,
+        task_id=task_id,
+        title=title,
+        year=year,
+        media_type=media_type,
+        confidence=1.0,
+    )
 
     # 2. 获取并保存元数据详情
     detail_result = fetch_and_save_metadata_detail(
@@ -135,6 +143,14 @@ def submit_manual_selection(
             summary=f"候选已保存，但获取详情失败：{detail_result.summary}",
             candidate_id=sel_result.candidate_id,
         )
+    _overwrite_task_metadata_fields(
+        session,
+        task_id=task_id,
+        title=detail_result.title or title,
+        year=detail_result.year if detail_result.year is not None else year,
+        media_type=media_type,
+        confidence=1.0,
+    )
 
     # 3. 检查 eligibility
     eligibility = check_eligibility(
@@ -175,6 +191,7 @@ def submit_manual_selection(
             f"[SystemAction] 用户手动选择了 {title} ({year}) from {provider}，"
             f"系统已自动完成发布。",
         )
+        _complete_manual_selection_run(session, task_id)
         return ManualSelectResult(
             status="published",
             summary=f"已选择 {title} ({year}) 并完成快捷发布",
@@ -417,6 +434,48 @@ def _supersede_pending_decisions(
         decision.decision = {"type": "system", "reason": reason}
         decision.decided_by = "system"
         decision.decided_at = utc_now()
+    session.flush()
+
+
+def _overwrite_task_metadata_fields(
+    session: Session,
+    *,
+    task_id: str,
+    title: str | None,
+    year: int | None,
+    media_type: str,
+    confidence: float | None,
+) -> None:
+    """人工选择是显式纠错，必须覆盖旧的错误 task 主字段。"""
+    from media_pilot.repository.repositories import IngestTaskRepository
+
+    task = IngestTaskRepository(session).get(task_id)
+    if task is None:
+        return
+    if title:
+        task.title = title
+    task.year = year
+    task.media_type = media_type
+    if confidence is not None:
+        task.confidence = confidence
+    task.failure_reason = None
+    session.flush()
+
+
+def _complete_manual_selection_run(session: Session, task_id: str) -> None:
+    """手动选择确定性发布成功后，收口旧 waiting/active AgentRun。"""
+    from media_pilot.repository.repositories import AgentRunRepository
+
+    run_repo = AgentRunRepository(session)
+    run = run_repo.get_active_or_waiting_by_task(task_id)
+    if run is None:
+        return
+    run_repo.update_status(
+        run,
+        status="completed",
+        current_step="manual_metadata_published",
+    )
+    run.error_message = None
     session.flush()
 
 

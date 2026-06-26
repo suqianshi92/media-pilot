@@ -949,6 +949,8 @@ def research_candidates(
                 original_title=c.original_title,
                 year=c.year,
                 media_type=c.media_type or "movie",  # type: ignore[arg-type]
+                overview=(c.payload or {}).get("overview"),
+                poster_url=(c.payload or {}).get("poster_url"),
                 confidence=c.confidence,
                 match_reason=c.reason,
             )
