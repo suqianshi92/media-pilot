@@ -1025,3 +1025,71 @@ def test_manual_select_completed_task_revokes_before_republish(
 
     assert result.status == "published"
     assert calls == ["revoke:True", "publish"]
+
+
+def test_manual_select_publish_success_applies_trash_cleanup_policy(
+    tmp_path: Path, monkeypatch, stub_dependencies
+) -> None:
+    """手动选择确定性发布成功后，也必须执行 source_cleanup_policy=trash。"""
+    from media_pilot.repository.models import OperationRecord, WriteResult
+    from media_pilot.services import manual_selection as ms
+    from media_pilot.services.app_settings import AppSettings, AppSettingsService
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    from dataclasses import replace
+
+    config = replace(_make_config(tmp_path), trash_dir=tmp_path / "trash")
+    config.trash_dir.mkdir(parents=True, exist_ok=True)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+    AppSettingsService(session_factory).save(AppSettings(source_cleanup_policy="trash"))
+
+    source_path = config.downloads_dir / "source.mkv"
+    source_path.write_bytes(b"any content")
+    task_id = _make_task(
+        session_factory,
+        source_path=str(source_path),
+        status="waiting_user",
+    )
+
+    def _fake_publish(session, config, task_id):
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        task.status = "library_import_complete"
+        task.current_step = "library_import_complete"
+        session.add(WriteResult(
+            task_id=task_id,
+            status="succeeded",
+            payload={"target_file": "dummy"},
+        ))
+        session.flush()
+        return ms._PublishOutcome(kind="published")
+
+    monkeypatch.setattr(ms, "_quick_publish", _fake_publish)
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:456",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published"
+    assert not source_path.exists()
+    trashed = config.trash_dir / "source.mkv"
+    assert trashed.exists()
+
+    with session_factory() as session:
+        ops = list(session.scalars(
+            select(OperationRecord).where(OperationRecord.task_id == task_id)
+        ))
+        assert any(op.operation_type == "source_input_trashed" for op in ops)
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.status == "library_import_complete"

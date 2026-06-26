@@ -278,6 +278,115 @@ class TestSelectMetadataCandidateDeterministic:
             assert detail is not None
             assert detail.title == "Selected Movie"
 
+    def test_movie_candidate_publish_success_applies_trash_cleanup_policy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """候选决策确定性发布成功后，也必须执行 source_cleanup_policy=trash。"""
+        from media_pilot.agent import runner as runner_module
+
+        def _block_continue(*args, **kwargs):
+            raise AssertionError(
+                "continue_agent_run should NOT be called on publish success"
+            )
+
+        monkeypatch.setattr(runner_module, "continue_agent_run", _block_continue)
+
+        from sqlalchemy import select
+
+        from media_pilot.agent.tools import registry as registry_module
+        from media_pilot.repository.models import (
+            IngestTask,
+            MetadataDetail,
+            OperationRecord,
+            WriteResult,
+        )
+        from media_pilot.services import select_metadata_publish as smp_module
+        from media_pilot.services.app_settings import AppSettings, AppSettingsService
+
+        def _fake_fetch(*, session, config, task_id, provider_name, provider_id, media_type):
+            session.add(MetadataDetail(
+                task_id=task_id, provider=provider_name,
+                provider_id=provider_id, media_type=media_type,
+                title="Selected Movie", original_title=None, year=2026,
+                payload={"overview": "..."},
+            ))
+            session.flush()
+            return smp_module.FetchAndSaveDetailResult(
+                status="success", summary="ok", provider=provider_name,
+                provider_id=provider_id, title="Selected Movie", year=2026,
+            )
+
+        monkeypatch.setattr(smp_module, "fetch_and_save_metadata_detail", _fake_fetch)
+
+        def _publish_success(ctx, inp):
+            task = ctx.session.get(IngestTask, inp["task_id"])
+            assert task is not None
+            task.status = "library_import_complete"
+            task.current_step = "library_import_complete"
+            ctx.session.add(WriteResult(
+                task_id=inp["task_id"],
+                status="succeeded",
+                payload={"target_file": "dummy"},
+            ))
+            ctx.session.flush()
+            return _FakeToolResult(status="success", summary="published", data={})
+
+        registry = _FakeToolRegistry({"publish_movie_to_library": _publish_success})
+        monkeypatch.setattr(registry_module, "get_tool_registry", lambda: registry)
+        monkeypatch.setattr(registry_module, "register_builtin_tools", lambda: None)
+
+        from dataclasses import replace
+
+        config = replace(_make_config(tmp_path), trash_dir=tmp_path / "trash")
+        config.trash_dir.mkdir(parents=True, exist_ok=True)
+        sf = _make_session_factory(tmp_path)
+        AppSettingsService(sf).save(AppSettings(source_cleanup_policy="trash"))
+
+        source = config.downloads_dir / "source.mkv"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"movie")
+        with sf() as session:
+            task = _make_task(
+                session, source_path=str(source), media_type="movie",
+            )
+            cid = _add_candidate(
+                session, task_id=task.id, source="tmdb",
+                media_type="movie", title="Selected Movie", year=2026,
+                external_id="movie:68735", confidence=0.7,
+            )
+            run = _make_run(session, task.id)
+            dr = _make_decision(
+                session, run_id=run.id, task_id=task.id,
+                decision_type="select_metadata_candidate",
+                question="...",
+                options=[_make_decision_option(
+                    cid=cid, provider="tmdb", provider_id="movie:68735",
+                    media_type="movie", title="Selected Movie", year=2026,
+                )],
+            )
+            decision_id = dr.id
+            task_id = task.id
+
+        with sf() as session:
+            from media_pilot.services.decision_reply import ReplyInput, reply_to_decision
+
+            result = reply_to_decision(
+                session=session,
+                config=config,
+                reply=ReplyInput(decision_id=decision_id, option_id=f"candidate_{cid}"),
+            )
+            session.commit()
+
+        assert result.status == "metadata_published"
+        assert not source.exists()
+        assert (config.trash_dir / "source.mkv").exists()
+
+        with sf() as session:
+            ops = list(session.scalars(
+                select(OperationRecord).where(OperationRecord.task_id == task_id)
+            ))
+            assert any(op.operation_type == "source_input_trashed" for op in ops)
+
     def test_movie_candidate_publish_target_conflict_creates_decision(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ):

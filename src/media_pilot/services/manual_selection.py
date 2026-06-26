@@ -186,12 +186,16 @@ def submit_manual_selection(
     # 5. 所有门禁通过 → 确定性快捷发布
     outcome = _quick_publish(session, config, task_id)
     if outcome.kind == "published":
+        cleanup_result = _run_manual_post_publish_cleanup(
+            session=session, config=config, task_id=task_id,
+        )
         _write_system_message(
             session, task_id,
             f"[SystemAction] 用户手动选择了 {title} ({year}) from {provider}，"
             f"系统已自动完成发布。",
         )
-        _complete_manual_selection_run(session, task_id)
+        if not cleanup_result.decision_requested:
+            _complete_manual_selection_run(session, task_id)
         return ManualSelectResult(
             status="published",
             summary=f"已选择 {title} ({year}) 并完成快捷发布",
@@ -376,6 +380,25 @@ def _quick_publish_show(
             final_target_file=data.get("final_target_file"),
         )
     return _PublishOutcome(kind="failed", reason=result.summary)
+
+
+def _run_manual_post_publish_cleanup(
+    *,
+    session: Session,
+    config: AppConfig,
+    task_id: str,
+):
+    """手动发布成功后执行统一 source_cleanup_policy。"""
+    from media_pilot.repository.repositories import AgentRunRepository
+    from media_pilot.services.post_publish_cleanup import run_post_publish_source_cleanup
+
+    run = AgentRunRepository(session).get_active_or_waiting_by_task(task_id)
+    return run_post_publish_source_cleanup(
+        session=session,
+        config=config,
+        task_id=task_id,
+        run_id=run.id if run is not None else None,
+    )
 
 
 def _revoke_completed_publish_for_manual_reselect(

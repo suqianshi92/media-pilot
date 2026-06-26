@@ -300,12 +300,17 @@ def reply_to_decision(
             # (工具内调了 update_status); run 收口.
             task_repo.update_status(
                 task, status="library_import_complete",
-                current_step="library_import_complete",
+                current_step=(
+                    "source_cleanup_decision"
+                    if apply_result.cleanup_decision_requested
+                    else "library_import_complete"
+                ),
             )
-            run_repo.update_status(
-                run, status="completed",
-                current_step="metadata_published",
-            )
+            if not apply_result.cleanup_decision_requested:
+                run_repo.update_status(
+                    run, status="completed",
+                    current_step="metadata_published",
+                )
             return AgentRunResult(
                 run_id=decision.run_id,
                 status="metadata_published",

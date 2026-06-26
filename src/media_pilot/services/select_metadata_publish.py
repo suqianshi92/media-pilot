@@ -68,6 +68,7 @@ class ApplyUserChoiceResult:
     target_conflict_question: str | None = None
     target_conflict_options: list[dict] | None = None
     target_conflict_payload: dict | None = None
+    cleanup_decision_requested: bool = False
 
 
 def apply_user_metadata_choice(
@@ -159,8 +160,23 @@ def apply_user_metadata_choice(
             error_message=f"publish tool raised: {exc}",
         )
 
-    return _interpret_publish_result(
+    interpreted = _interpret_publish_result(
         session=session, decision=decision, tool_result=tool_result,
+    )
+    if interpreted.outcome != OUTCOME_LIBRARY_IMPORT_COMPLETE:
+        return interpreted
+
+    from media_pilot.services.post_publish_cleanup import run_post_publish_source_cleanup
+
+    cleanup = run_post_publish_source_cleanup(
+        session=session,
+        config=config,
+        task_id=task.id,
+        run_id=decision.run_id,
+    )
+    return ApplyUserChoiceResult(
+        outcome=interpreted.outcome,
+        cleanup_decision_requested=cleanup.decision_requested,
     )
 
 
