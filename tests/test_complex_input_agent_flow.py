@@ -1064,6 +1064,69 @@ class TestBatchedToolCallsAfterFailure:
                 f"实际: {[m.content for m in search_msgs]}"
             )
 
+    def test_decision_request_skips_all_remaining_tool_calls_in_same_batch(
+        self, tmp_path: Path,
+    ):
+        """同批次剩余多个 tool_call 都必须补 tool message, 否则 LLM 会拒绝历史。"""
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        config.downloads_dir.mkdir(parents=True, exist_ok=True)
+        (config.downloads_dir / "A.mkv").write_bytes(b"a")
+        (config.downloads_dir / "B.mkv").write_bytes(b"b")
+
+        with sf() as session:
+            from media_pilot.agent.tools.registry import register_builtin_tools
+            register_builtin_tools()
+            task = _make_task_with_source(session, str(config.downloads_dir))
+            task_id = task.id
+
+        mock = self._build_mock_with_batch(
+            {"name": "prepare_complex_input_decision",
+             "arguments": {"task_id": task_id}},
+            {"name": "scan_task_files",
+             "arguments": {"task_id": task_id},
+             "call_id": "call_scan"},
+            {"name": "get_current_metadata",
+             "arguments": {"task_id": task_id},
+             "call_id": "call_metadata"},
+        )
+
+        with sf() as session:
+            from media_pilot.agent.runner import run_agent_turn
+            result = run_agent_turn(
+                session=session, config=config, task_id=task_id,
+                mock_llm_client=mock,
+            )
+            session.commit()
+            assert result.status == "waiting_user"
+            assert result.tool_call_count == 3
+            run_id = result.run_id
+
+        with sf() as session:
+            from media_pilot.repository.repositories import (
+                AgentMessageRepository,
+                AgentToolCallRepository,
+            )
+            tcs = AgentToolCallRepository(session).list_by_run(run_id)
+            assert [tc.tool_name for tc in tcs] == ["prepare_complex_input_decision"]
+
+            messages = AgentMessageRepository(session).list_by_run(run_id)
+            skipped = {
+                m.tool_name: m
+                for m in messages
+                if m.role == "tool" and m.tool_name in {
+                    "scan_task_files", "get_current_metadata",
+                }
+            }
+            assert set(skipped) == {"scan_task_files", "get_current_metadata"}
+            assert all("not executed" in (m.content or "") for m in skipped.values())
+            assert all(
+                "pending AgentDecisionRequest" in (m.content or "")
+                for m in skipped.values()
+            )
+
     def test_ready_then_search_metadata_same_batch_executes_both(
         self, tmp_path: Path,
     ):

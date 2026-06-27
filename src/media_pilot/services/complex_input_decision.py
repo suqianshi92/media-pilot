@@ -283,27 +283,6 @@ def prepare_complex_input_decision(
     - user_note: review_complex_input 的用户说明 → 已在上一轮消费过,
       工具拒绝重复创建 review 决策, 改为返回 unsupported+stop 边界.
     """
-    # ── user_note 存在 → 上一轮 review_complex_input 已消费; 本轮不再重复.
-    #   显式返回 unsupported, 让 Agent 解释用户说明并停止决策.
-    if user_selection and user_selection.get("user_note"):
-        # 复用扫描结果但跳过所有可能创建新决策的分支.
-        try:
-            analysis = _safe_analyze(source_path, config)
-        except Exception:
-            analysis = None
-        note = str(user_selection.get("user_note") or "").strip()
-        return ComplexInputDecision(
-            status="unsupported",
-            decision_type="review_complex_input",
-            question=(
-                f"用户已在上轮回复复核说明: {note!r}. 不会再创建 review 决策; "
-                "请基于该说明解释如何继续, 或在任务工作台采取进一步动作。"
-            ),
-            free_text_allowed=False,
-            analysis=analysis,
-            reason="review_user_note_already_consumed",
-        )
-
     if not source_path.exists():
         return ComplexInputDecision(
             status="scan_failed",
@@ -358,6 +337,24 @@ def prepare_complex_input_decision(
             status="show_like",
             analysis=analysis,
             reason="show_like",
+        )
+
+    # ── user_note 存在 → 上一轮 review_complex_input 已消费; 本轮不再重复.
+    # 但必须先基于当前文件事实重新识别 ISO / BDMV / show_like: 旧版本曾把
+    # BDMV 误判为 review_complex_input, 升级后重试应允许 BDMV 直接回到
+    # ready 路径, 不能被历史 user_note 永久遮蔽.
+    if user_selection and user_selection.get("user_note"):
+        note = str(user_selection.get("user_note") or "").strip()
+        return ComplexInputDecision(
+            status="unsupported",
+            decision_type="review_complex_input",
+            question=(
+                f"用户已在上轮回复复核说明: {note!r}. 不会再创建 review 决策; "
+                "请基于该说明解释如何继续, 或在任务工作台采取进一步动作。"
+            ),
+            free_text_allowed=False,
+            analysis=analysis,
+            reason="review_user_note_already_consumed",
         )
 
     if not analysis.video_candidates:

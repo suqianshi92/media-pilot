@@ -209,6 +209,32 @@ class TestBdmvIso:
         assert result.reason == "bdmv_movie_ready"
         assert "bdmv_movie_directory" in result.analysis.detected
 
+    def test_bdmv_ready_overrides_consumed_review_note(self, tmp_path: Path):
+        """旧版本可能给 BDMV 创建 review 决策；升级后重试应按当前事实继续。"""
+        config = _make_config(tmp_path)
+        config.downloads_dir.mkdir(parents=True, exist_ok=True)
+        bdmv_root = config.downloads_dir / "MY_MOVIE"
+        bdmv_root.mkdir()
+        (bdmv_root / "BDMV" / "STREAM").mkdir(parents=True)
+        (bdmv_root / "BDMV" / "index.bdmv").write_bytes(b"index")
+
+        from media_pilot.services.complex_input_decision import (
+            prepare_complex_input_decision,
+        )
+
+        result = prepare_complex_input_decision(
+            config=config,
+            source_path=bdmv_root,
+            user_selection={
+                "decision_type": "review_complex_input",
+                "user_note": "使用工具重新尝试入库",
+            },
+        )
+
+        assert result.status == "ready"
+        assert result.reason == "bdmv_movie_ready"
+        assert "bdmv_movie_directory" in result.analysis.detected
+
     def test_iso_file_returns_unsupported(self, tmp_path: Path):
         config = _make_config(tmp_path)
         config.downloads_dir.mkdir(parents=True, exist_ok=True)

@@ -998,8 +998,11 @@ def _run_agent_loop(
                                 "summary": skip_msg,
                             },
                         ))
-                    # 跳出 for 循环: 本批次剩余 tool_call 一并跳过.
-                    break
+                    # 继续遍历剩余 tool_call: OpenAI/DeepSeek 协议要求
+                    # assistant message 中每一个 tool_call_id 都必须有一条
+                    # 对应 tool message. 不能 break, 否则历史消息再次提交
+                    # 给 LLM 时会触发 invalid_request_error.
+                    continue
 
                 # Parse arguments
                 try:
