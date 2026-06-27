@@ -19,6 +19,7 @@ from media_pilot.orchestration.staging_cleanup import cleanup_empty_staging_task
 from media_pilot.repository.audit import record_file_operation, record_generated_file_operation
 from media_pilot.repository.models import FileAsset
 from media_pilot.repository.repositories import WritePlanRepository, WriteResultRepository
+from media_pilot.services.disc_input import resolve_bdmv_movie_source
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ CANONICAL_QUALITY_TOKENS = {
 
 @dataclass(frozen=True)
 class MovieWritePlanDraft:
+    source_kind: str
     target_dir: Path
     target_file: Path
     final_target_dir: Path
@@ -64,14 +66,17 @@ def build_movie_write_plan(
     provider: str = "tmdb",
     identifier: str | None = None,
 ) -> MovieWritePlanDraft:
-    # Sanity check: 目录型 source_path 会在 ``source_path.suffix`` 上拿到
+    bdmv_source = resolve_bdmv_movie_source(source_path)
+    source_kind = "bdmv" if bdmv_source is not None else "file"
+
+    # Sanity check: 普通目录型 source_path 会在 ``source_path.suffix`` 上拿到
     # 目录名后缀 (e.g. `[YTS.MX]` → `.MX]`), 之后 ``shutil.copy2`` 会抛
     # ``IsADirectoryError``. services/video_source_resolver.py 应在调用
-    # 本函数前过滤掉目录, 这里只是开发期兜底.
+    # 本函数前过滤掉普通目录. BDMV 是显式支持的目录型 movie source.
     #
     # 注意: 只查 "是不是目录", 不查 is_file() — 测试可能用不存在的路径
     # (mock 场景), 让 plan 计算可以先跑, 真正的 fs 错误留给 execute_movie_write.
-    assert not source_path.is_dir(), (
+    assert source_kind == "bdmv" or not source_path.is_dir(), (
         f"build_movie_write_plan 收到目录路径, 应通过 "
         f"services/video_source_resolver.py 解析为文件: {source_path}"
     )
@@ -85,22 +90,32 @@ def build_movie_write_plan(
     directory_name = _movie_directory_name(
         detail.title, detail.year, identifier=path_identifier,
     )
-    quality_suffix = _quality_suffix_from_source_name(
+    quality_suffix = "" if source_kind == "bdmv" else _quality_suffix_from_source_name(
         source_stem=source_path.stem,
         title=detail.title,
         year=detail.year,
     )
     target_dir = movies_dir / ".media-pilot-staging" / task_id / directory_name
     final_target_dir = movies_dir / directory_name
-    raw_file_stem = directory_name if quality_suffix == "" else f"{directory_name} - {quality_suffix}"
-    file_stem = safe_file_stem(raw_file_stem, extension=source_path.suffix)
-    target_file = target_dir / f"{file_stem}{source_path.suffix}"
-    final_target_file = final_target_dir / f"{file_stem}{source_path.suffix}"
-    nfo_path = target_dir / f"{directory_name}.nfo"
+    if source_kind == "bdmv":
+        target_file = target_dir / "BDMV" / "index.bdmv"
+        final_target_file = final_target_dir / "BDMV" / "index.bdmv"
+        nfo_path = target_dir / "BDMV" / "index.nfo"
+    else:
+        raw_file_stem = (
+            directory_name
+            if quality_suffix == ""
+            else f"{directory_name} - {quality_suffix}"
+        )
+        file_stem = safe_file_stem(raw_file_stem, extension=source_path.suffix)
+        target_file = target_dir / f"{file_stem}{source_path.suffix}"
+        final_target_file = final_target_dir / f"{file_stem}{source_path.suffix}"
+        nfo_path = target_dir / f"{directory_name}.nfo"
     poster_path = target_dir / f"{directory_name}-poster.jpg"
     fanart_path = target_dir / f"{directory_name}-fanart.jpg"
     clearlogo_path = target_dir / f"{directory_name}-clearlogo.png"
     return MovieWritePlanDraft(
+        source_kind=source_kind,
         target_dir=target_dir,
         target_file=target_file,
         final_target_dir=final_target_dir,
@@ -113,6 +128,8 @@ def build_movie_write_plan(
 
 
 def detect_movie_write_conflict(plan: MovieWritePlanDraft) -> str | None:
+    if plan.source_kind == "bdmv" and plan.final_target_dir.exists():
+        return "final_target_dir_exists"
     if plan.final_target_file.exists():
         return "final_target_file_exists"
     if plan.final_target_dir.exists():
@@ -146,10 +163,12 @@ def execute_movie_write(
     # 残留. 仅写 WriteResult failed 留痕.
     pre_warnings: list[str] = []
     pre_task_input_root = _resolve_task_input_root(session, task_id, source_path)
-    pre_user_selected = _load_user_selected_subtitles(
-        session, task_id=task_id, source_root=pre_task_input_root,
-    )
-    if pre_user_selected is _USER_SUBS_UNSAFE:
+    pre_user_selected = None
+    if plan.source_kind == "file":
+        pre_user_selected = _load_user_selected_subtitles(
+            session, task_id=task_id, source_root=pre_task_input_root,
+        )
+    if plan.source_kind == "file" and pre_user_selected is _USER_SUBS_UNSAFE:
         WriteResultRepository(session).save(
             task_id,
             status="failed",
@@ -201,7 +220,7 @@ def execute_movie_write(
         conflict = detect_movie_write_conflict(plan)
 
     plan.target_dir.mkdir(parents=True, exist_ok=True)
-    dir_operation = record_generated_file_operation(
+    record_generated_file_operation(
         session,
         task_id=task_id,
         operation_type="create_directory",
@@ -212,11 +231,41 @@ def execute_movie_write(
     )
 
     warnings: list[str] = []
+    if plan.source_kind == "bdmv":
+        if progress_callback is not None:
+            progress_callback("copy_bdmv_to_staging")
+        duration_ms = _copy_bdmv_to_staging(source_path, plan.target_dir)
+        bdmv_target = plan.target_dir / "BDMV"
+        bdmv_asset = FileAsset(
+            task_id=task_id,
+            role="library_bdmv",
+            path=str(bdmv_target),
+            size_bytes=None,
+        )
+        session.add(bdmv_asset)
+        session.flush()
+        record_file_operation(
+            session,
+            task_id=task_id,
+            operation_type="copy_bdmv_to_staging",
+            permission_level="safe_write",
+            source_path=source_path,
+            target_path=bdmv_target,
+            status="succeeded",
+            actor="system",
+            file_asset_id=bdmv_asset.id,
+            extra_details={
+                "transfer_method": "copytree",
+                "duration_ms": duration_ms,
+            },
+        )
+
     if progress_callback is not None:
         progress_callback("write_metadata_assets")
     nfo_bytes = render_movie_nfo(
         detail, provider=provider, identifier=identifier,
     ).encode("utf-8")
+    plan.nfo_path.parent.mkdir(parents=True, exist_ok=True)
     _write_generated_file(
         session,
         task_id=task_id,
@@ -270,105 +319,100 @@ def execute_movie_write(
             operation_type=operation_type,
         )
 
-    plan.target_file.parent.mkdir(parents=True, exist_ok=True)
-    if progress_callback is not None:
-        progress_callback("copy_to_staging")
-    duration_ms = _copy_video_to_staging(source_path, plan.target_file)
-    video_asset = FileAsset(
-        task_id=task_id,
-        role="library_video",
-        path=str(plan.target_file),
-        size_bytes=plan.target_file.stat().st_size,
-    )
-    session.add(video_asset)
-    session.flush()
-    move_operation = record_file_operation(
-        session,
-        task_id=task_id,
-        operation_type="copy_to_staging",
-        permission_level="safe_write",
-        source_path=source_path,
-        target_path=plan.target_file,
-        status="succeeded",
-        actor="system",
-        file_asset_id=video_asset.id,
-        extra_details={
-            "transfer_method": "copy",
-            "duration_ms": duration_ms,
-        },
-    )
+    if plan.source_kind == "file":
+        plan.target_file.parent.mkdir(parents=True, exist_ok=True)
+        if progress_callback is not None:
+            progress_callback("copy_to_staging")
+        duration_ms = _copy_video_to_staging(source_path, plan.target_file)
+        video_asset = FileAsset(
+            task_id=task_id,
+            role="library_video",
+            path=str(plan.target_file),
+            size_bytes=plan.target_file.stat().st_size,
+        )
+        session.add(video_asset)
+        session.flush()
+        record_file_operation(
+            session,
+            task_id=task_id,
+            operation_type="copy_to_staging",
+            permission_level="safe_write",
+            source_path=source_path,
+            target_path=plan.target_file,
+            status="succeeded",
+            actor="system",
+            file_asset_id=video_asset.id,
+            extra_details={
+                "transfer_method": "copy",
+                "duration_ms": duration_ms,
+            },
+        )
 
-    # ── subtitle copy: 优先消费用户明确选择的字幕, 否则 same-stem 自动带入 ─
-    # 字幕安全已经在函数开头预校验 (unSafe 路径在创建 staging 之前就
-    # 失败返回), 此处只处理 _USER_SUBS_NOT_FOUND (input 节点无法解析
-    # → same-stem fallback) 和复制本身.
-    from media_pilot.repository.models import MediaSourceSelection
-    from media_pilot.repository.repositories import (
-        MediaSourceSelectionRepository,
-    )
-    from media_pilot.services.task_input_analysis import _find_same_stem_subtitles
+        # ── subtitle copy: 优先消费用户明确选择的字幕, 否则 same-stem 自动带入 ─
+        # BDMV 首版不处理外挂字幕.
+        from media_pilot.services.task_input_analysis import _find_same_stem_subtitles
 
-    final_stem = plan.target_file.stem
-    task_input_root = _resolve_task_input_root(session, task_id, source_path)
-    user_selected_subs = _load_user_selected_subtitles(
-        session, task_id=task_id, source_root=task_input_root,
-    )
-    if user_selected_subs is _USER_SUBS_NOT_FOUND:
-        # 任务输入节点无法解析, 不能安全复制 — 走 same-stem fallback 让发布继续,
-        # 同时在 warnings 里记录拒绝原因.
-        warnings.append("subtitle_user_selection_skipped:input_node_unresolved")
-        user_selected_subs = None
+        final_stem = plan.target_file.stem
+        task_input_root = _resolve_task_input_root(session, task_id, source_path)
+        user_selected_subs = _load_user_selected_subtitles(
+            session, task_id=task_id, source_root=task_input_root,
+        )
+        if user_selected_subs is _USER_SUBS_NOT_FOUND:
+            # 任务输入节点无法解析, 不能安全复制 — 走 same-stem fallback 让发布继续,
+            # 同时在 warnings 里记录拒绝原因.
+            warnings.append("subtitle_user_selection_skipped:input_node_unresolved")
+            user_selected_subs = None
 
-    if user_selected_subs is not None:
-        subtitle_specs = _build_user_subtitle_specs(user_selected_subs, final_stem, source_path)
-    else:
-        subtitle_specs = [
-            (Path(sub.path), sub.name, sub.matched_by == "same_stem")
-            for sub in _find_same_stem_subtitles(source_path)
-        ]
-    for sub_source, sub_name, sub_matched_same_stem in subtitle_specs:
-        try:
-            if not sub_source.exists():
-                warnings.append(f"subtitle_copy_failed:{sub_name}:source_missing")
-                continue
-            sub_ext = sub_source.suffix
-            video_stem = source_path.stem
-            if sub_matched_same_stem and sub_source.stem != video_stem:
-                kept = sub_source.stem[len(video_stem):]
-                target_name = f"{final_stem}{kept}{sub_ext}"
-            else:
-                target_name = f"{final_stem}{sub_ext}"
+        if user_selected_subs is not None:
+            subtitle_specs = _build_user_subtitle_specs(user_selected_subs, final_stem, source_path)
+        else:
+            subtitle_specs = [
+                (Path(sub.path), sub.name, sub.matched_by == "same_stem")
+                for sub in _find_same_stem_subtitles(source_path)
+            ]
+        for sub_source, sub_name, sub_matched_same_stem in subtitle_specs:
+            try:
+                if not sub_source.exists():
+                    warnings.append(f"subtitle_copy_failed:{sub_name}:source_missing")
+                    continue
+                sub_ext = sub_source.suffix
+                video_stem = source_path.stem
+                if sub_matched_same_stem and sub_source.stem != video_stem:
+                    kept = sub_source.stem[len(video_stem):]
+                    target_name = f"{final_stem}{kept}{sub_ext}"
+                else:
+                    target_name = f"{final_stem}{sub_ext}"
 
-            sub_target = plan.target_dir / target_name
-            shutil.copy2(sub_source, sub_target)
+                sub_target = plan.target_dir / target_name
+                shutil.copy2(sub_source, sub_target)
 
-            sub_asset = FileAsset(
-                task_id=task_id,
-                role="library_subtitle",
-                path=str(sub_target),
-                size_bytes=sub_target.stat().st_size,
-            )
-            session.add(sub_asset)
-            session.flush()
+                sub_asset = FileAsset(
+                    task_id=task_id,
+                    role="library_subtitle",
+                    path=str(sub_target),
+                    size_bytes=sub_target.stat().st_size,
+                )
+                session.add(sub_asset)
+                session.flush()
 
-            record_file_operation(
-                session,
-                task_id=task_id,
-                operation_type="copy_subtitle_to_staging",
-                permission_level="safe_write",
-                source_path=sub_source,
-                target_path=sub_target,
-                status="succeeded",
-                actor="system",
-                file_asset_id=sub_asset.id,
-            )
-        except Exception as exc:
-            warnings.append(f"subtitle_copy_failed:{sub_name}:{exc}")
+                record_file_operation(
+                    session,
+                    task_id=task_id,
+                    operation_type="copy_subtitle_to_staging",
+                    permission_level="safe_write",
+                    source_path=sub_source,
+                    target_path=sub_target,
+                    status="succeeded",
+                    actor="system",
+                    file_asset_id=sub_asset.id,
+                )
+            except Exception as exc:
+                warnings.append(f"subtitle_copy_failed:{sub_name}:{exc}")
 
     try:
         if progress_callback is not None:
             progress_callback("publish_to_library")
-        publish_operation = _publish_staging_directory(
+        _publish_staging_directory(
             session,
             task_id=task_id,
             staging_dir=plan.target_dir,
@@ -395,6 +439,7 @@ def execute_movie_write(
                 "target_dir": str(plan.target_dir),
                 "target_file": str(plan.target_file),
                 "nfo_path": str(plan.nfo_path),
+                "source_kind": plan.source_kind,
             },
         )
         return MovieWriteResult(status="failed", warnings=warnings)
@@ -413,7 +458,8 @@ def execute_movie_write(
         payload={
             "target_dir": str(plan.final_target_dir),
             "target_file": str(plan.final_target_file),
-            "nfo_path": str(plan.final_target_dir / plan.nfo_path.name),
+            "nfo_path": str(plan.final_target_dir / plan.nfo_path.relative_to(plan.target_dir)),
+            "source_kind": plan.source_kind,
             "warnings": warnings,
         },
     )
@@ -450,6 +496,26 @@ def _cleanup_movie_staging(target_dir: Path, task_id: str, session: Session) -> 
 def _copy_video_to_staging(source_path: Path, target_path: Path) -> int:
     started_at = time.perf_counter()
     shutil.copy2(source_path, target_path)
+    return int((time.perf_counter() - started_at) * 1000)
+
+
+def _copy_bdmv_to_staging(source_path: Path, target_dir: Path) -> int:
+    bdmv_source = resolve_bdmv_movie_source(source_path)
+    if bdmv_source is None:
+        raise ValueError(f"Not a supported BDMV movie source: {source_path}")
+
+    started_at = time.perf_counter()
+    shutil.copytree(
+        bdmv_source.bdmv_dir,
+        target_dir / "BDMV",
+        dirs_exist_ok=True,
+    )
+    if bdmv_source.certificate_dir is not None:
+        shutil.copytree(
+            bdmv_source.certificate_dir,
+            target_dir / "CERTIFICATE",
+            dirs_exist_ok=True,
+        )
     return int((time.perf_counter() - started_at) * 1000)
 
 
@@ -602,7 +668,7 @@ def _record_generated_asset(
     )
     session.add(asset)
     session.flush()
-    operation = record_generated_file_operation(
+    record_generated_file_operation(
         session,
         task_id=task_id,
         operation_type=operation_type,

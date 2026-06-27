@@ -39,16 +39,23 @@ def _make_session_factory(tmp_path: Path):
     return create_session_factory(config)
 
 
-def _create_published_task(tmp_path: Path, *, selected_path: str = "/media/downloads/test.mkv",
-                            bdmv_detected: bool = False,
-                            publish_dir: str | None = None):
+def _create_published_task(
+    tmp_path: Path,
+    *,
+    selected_path: str | None = "/media/downloads/test.mkv",
+    input_path: str | None = None,
+    bdmv_detected: bool = False,
+    selection_payload: dict | None = None,
+    publish_dir: str | None = None,
+):
     """创建一个 library_import_complete 状态的任务，含必要的关联数据。"""
     if publish_dir is None:
         publish_dir = str(tmp_path / "library" / "movies" / "Test Movie (2026)")
+    task_source_path = input_path or selected_path
     session_factory = _make_session_factory(tmp_path)
     with session_factory() as session:
         task = IngestTaskRepository(session).create(IngestTaskCreate(
-            source_path=selected_path,
+            source_path=task_source_path,
             status="library_import_complete",
             current_step="library_import_complete",
         ))
@@ -56,9 +63,9 @@ def _create_published_task(tmp_path: Path, *, selected_path: str = "/media/downl
         # 写入 MediaSourceSelection
         sel = MediaSourceSelection(
             task_id=task.id,
-            input_path=selected_path,
+            input_path=input_path or selected_path,
             selected_path=selected_path,
-            payload={"bdmv_detected": bdmv_detected},
+            payload=selection_payload or {"bdmv_detected": bdmv_detected},
         )
         session.add(sel)
 
@@ -132,8 +139,35 @@ def test_check_revoke_publish_bdmv(tmp_path: Path):
     data = resp.json()
     assert data["status"] == "success"
     assert data["data"]["allowed"] is True
+    assert data["data"]["source_file_exists"] is True
     assert data["data"]["is_complex_structure"] is True
     assert "BDMV" in data["data"]["outcome_description"]
+
+
+def test_check_revoke_publish_bdmv_source_kind_payload(tmp_path: Path):
+    """新 BDMV selection 形状同样按复杂结构处理。"""
+    from media_pilot.orchestration.revoke_publish import check_revoke_publish
+
+    source_dir = tmp_path / "downloads" / "Disc Movie"
+    (source_dir / "BDMV" / "STREAM").mkdir(parents=True)
+    (source_dir / "BDMV" / "index.bdmv").write_text("bdmv")
+    task_id, pd, session_factory = _create_published_task(
+        tmp_path,
+        selected_path=None,
+        input_path=str(source_dir),
+        selection_payload={
+            "source_kind": "bdmv",
+            "bdmv_dir": str(source_dir / "BDMV"),
+        },
+    )
+
+    with session_factory() as session:
+        result = check_revoke_publish(session, task_id=task_id)
+
+    assert result.allowed is True
+    assert result.source_file_exists is True
+    assert result.is_complex_structure is True
+    assert "BDMV" in result.outcome_description
 
 
 def test_check_revoke_publish_not_published(tmp_path: Path):

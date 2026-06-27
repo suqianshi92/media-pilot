@@ -431,7 +431,7 @@ def test_manual_select_blocked_with_existing_run_attaches_decision(
     def _blocked_eligibility(*, session, config, task_id):
         return EligibilityResult(
             eligible=False,
-            blocking_reasons=["bdmv_or_iso_not_supported"],
+            blocking_reasons=["iso_image_not_supported"],
             media_type="movie",
         )
 

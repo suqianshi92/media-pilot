@@ -1,6 +1,6 @@
 """复杂电影输入分析与决策生成服务.
 
-把多视频、样片花絮、字幕归属不明确、疑似剧集/BDMV/ISO 等场景
+把多视频、样片花絮、字幕归属不明确、疑似剧集/ISO 等场景
 转成可回复的 AgentDecisionRequest. 不引入 ffprobe/mediainfo
 或本地视频时长/分辨率探测 — 决策选项完全基于文件名、扩展名、
 大小、同源字幕匹配和样片标记生成.
@@ -22,17 +22,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from media_pilot.config import AppConfig
-from media_pilot.orchestration.ingestion import MEDIA_EXTENSIONS
+from media_pilot.services.disc_input import (
+    is_iso_image,
+    resolve_bdmv_movie_source,
+)
 from media_pilot.services.task_input_analysis import (
     FileInfo,
     analyze_task_input,
-    is_auxiliary_video,
 )
 
 
-# BDMV/ISO 等首版不支持的高风险结构.
-BDMV_MARKERS = ("BDMV", "CERTIFICATE", "STREAM")
-ISO_EXTENSIONS = (".iso", ".img")
+# ISO 仍不支持；已解包 BDMV 电影目录作为 opaque movie source 支持.
 SHOW_PATTERN_HINTS = ("S01E", "S01.E", "season", "episode", "complete")
 
 
@@ -55,7 +55,7 @@ class ComplexInputDecision:
       不在电影入库路径上. 工具把它当 ready 透传, data 携带
       ``is_show=True`` 提示 LLM 走 ``prepare_show_structure``.
     - status == "decision_requested": 创建 decision_type 类型的人工决策请求.
-    - status == "unsupported": 高风险结构 (BDMV/ISO) 或上一轮
+    - status == "unsupported": ISO 或上一轮
       review_complex_input 已被 user_note 消费, 走 review_complex_input.
     - status == "no_videos": 任务输入节点没有任何视频文件.
     - status == "unsafe_path": 源路径不在受控输入根内.
@@ -67,7 +67,7 @@ class ComplexInputDecision:
     question: str | None = None
     options: list[DecisionOption] = field(default_factory=list)
     free_text_allowed: bool = False
-    analysis: "ComplexInputAnalysis | None" = None
+    analysis: ComplexInputAnalysis | None = None
     reason: str = ""
 
 
@@ -82,8 +82,9 @@ class ComplexInputAnalysis:
     subtitle_candidates: list[FileInfo]
     excluded: list[FileInfo]
     detected: list[str] = field(default_factory=list)
-    # detected 标记可能值: bdmv_or_iso / show_structure / multiple_videos /
-    # ambiguous_subtitles / single_video_ready
+    # detected 标记可能值: bdmv_movie_directory / iso_image /
+    # show_structure / multiple_videos / ambiguous_subtitles /
+    # single_video_ready
 
 
 def _is_within_safe_roots(path: Path, config: AppConfig) -> bool:
@@ -103,16 +104,6 @@ def _is_within_safe_roots(path: Path, config: AppConfig) -> bool:
                 return True
         except (OSError, ValueError):
             continue
-    return False
-
-
-def _detect_bdmv_or_iso(source_path: Path) -> bool:
-    if source_path.is_dir():
-        for marker in BDMV_MARKERS:
-            if (source_path / marker).exists():
-                return True
-    if source_path.is_file() and source_path.suffix.lower() in ISO_EXTENSIONS:
-        return True
     return False
 
 
@@ -162,8 +153,10 @@ def analyze_complex_input(
     1.9 MB + season 关键词的剧集目录被 size 启发式误吞成单视频电影.
     """
     detected: list[str] = []
-    if _detect_bdmv_or_iso(source_path):
-        detected.append("bdmv_or_iso")
+    if resolve_bdmv_movie_source(source_path) is not None:
+        detected.append("bdmv_movie_directory")
+    if is_iso_image(source_path):
+        detected.append("iso_image")
 
     analysis = analyze_task_input(source_path)
     video_candidates = [f for f in analysis.files if f.type == "video"]
@@ -184,7 +177,7 @@ def analyze_complex_input(
 
     # dominant_primary_video: size 启发式命中 (heuristic 把多视频折
     # 叠成 1, 且 pre_heuristic_videos 比 video_candidates 元素更多).
-    # show_structure / bdmv_or_iso 已命中时不再追加, 避免语义冲突 —
+    # show_structure / disc source 已命中时不再追加, 避免语义冲突 —
     # show_structure 路径下 size 启发式无效.
     heuristic_collapsed = (
         bool(analysis.pre_heuristic_videos)
@@ -193,7 +186,8 @@ def analyze_complex_input(
     if (
         heuristic_collapsed
         and "show_structure" not in detected
-        and "bdmv_or_iso" not in detected
+        and "bdmv_movie_directory" not in detected
+        and "iso_image" not in detected
     ):
         detected.append("dominant_primary_video")
 
@@ -332,18 +326,25 @@ def prepare_complex_input_decision(
             reason=f"scan_error:{type(exc).__name__}",
         )
 
-    # BDMV / ISO: 首版不支持, 拒绝直接转 review_complex_input.
-    if "bdmv_or_iso" in analysis.detected:
+    # ISO: 不支持. BDMV movie directory 已支持, 继续走 movie publish.
+    if "iso_image" in analysis.detected:
         return ComplexInputDecision(
             status="unsupported",
             decision_type="review_complex_input",
             question=(
-                f"源路径 {source_path} 看起来是 BDMV/ISO 目录结构, "
-                "首版不支持自动入库。请说明如何处理。"
+                f"源路径 {source_path} 看起来是 ISO/IMG 镜像, "
+                "当前不支持自动入库。请改为已解包 BDMV 目录或单文件电影。"
             ),
-            free_text_allowed=True,
+            free_text_allowed=False,
             analysis=analysis,
-            reason="bdmv_or_iso",
+            reason="iso_image_not_supported",
+        )
+
+    if "bdmv_movie_directory" in analysis.detected:
+        return ComplexInputDecision(
+            status="ready",
+            analysis=analysis,
+            reason="bdmv_movie_ready",
         )
 
     # 疑似剧集/合集: 不在电影入库路径上, 也不再创建 review_complex_input

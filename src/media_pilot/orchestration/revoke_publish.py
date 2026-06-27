@@ -99,18 +99,20 @@ def check_revoke_publish(session: Session, *, task_id: str) -> RevokePublishChec
     source_selection = MediaSourceSelectionRepository(session).get_for_task(task_id)
 
     selected_path: str | None = None
+    input_path: str | None = None
     is_complex_structure = False
     if source_selection is not None:
+        input_path = source_selection.input_path
         selected_path = source_selection.selected_path
-        is_complex_structure = (
-            source_selection.payload.get("bdmv_detected", False)
-            if source_selection.payload
-            else False
+        payload = source_selection.payload or {}
+        is_complex_structure = bool(
+            payload.get("bdmv_detected") or payload.get("source_kind") == "bdmv"
         )
 
     source_file_exists = False
-    if selected_path:
-        source_file_exists = Path(selected_path).exists()
+    source_probe = input_path if is_complex_structure else selected_path
+    if source_probe:
+        source_file_exists = Path(source_probe).exists()
 
     # 判别去向
     if is_complex_structure:

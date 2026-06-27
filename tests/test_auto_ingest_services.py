@@ -153,6 +153,57 @@ class TestEligibility:
             assert result.best_candidate["confidence"] == 0.95
             assert result.blocking_reasons == []
 
+    def test_bdmv_movie_directory_is_allowed_past_source_gates(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        bdmv_root = config.downloads_dir / "Example Movie Disc"
+        (bdmv_root / "BDMV" / "STREAM").mkdir(parents=True)
+        (bdmv_root / "BDMV" / "index.bdmv").write_bytes(b"index")
+        (bdmv_root / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"main")
+
+        with sf() as session:
+            task = _make_task(
+                session, source_path=str(bdmv_root), media_type="movie",
+            )
+            task_id = task.id
+            _make_candidate(session, task_id, confidence=0.95)
+            session.commit()
+
+        with sf() as session:
+            from media_pilot.services.auto_ingest import check_eligibility
+            result = check_eligibility(session=session, config=config, task_id=task_id)
+            assert result.eligible is True
+            assert result.is_bdmv_movie is True
+            assert result.is_iso_image is False
+            assert result.task_facts["source_kind"] == "bdmv"
+            assert "no_video_files_found" not in result.blocking_reasons
+            assert "multiple_video_files_not_supported" not in result.blocking_reasons
+
+    def test_iso_image_is_blocked(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        config.downloads_dir.mkdir(parents=True, exist_ok=True)
+        iso = config.downloads_dir / "Example Movie.iso"
+        iso.write_bytes(b"iso")
+
+        with sf() as session:
+            task = _make_task(session, source_path=str(iso), media_type="movie")
+            task_id = task.id
+            _make_candidate(session, task_id, confidence=0.95)
+            session.commit()
+
+        with sf() as session:
+            from media_pilot.services.auto_ingest import check_eligibility
+            result = check_eligibility(session=session, config=config, task_id=task_id)
+            assert result.eligible is False
+            assert result.is_iso_image is True
+            assert result.is_bdmv_movie is False
+            assert "iso_image_not_supported" in result.blocking_reasons
+
     def test_low_confidence_no_clear_winner(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
 
@@ -1354,6 +1405,80 @@ class TestWriteAgentTools:
             assert run.status == "failed"
             assert run.current_step == "movie_publish_failed"
             assert run.error_message == "poster_download_failed"
+
+    def test_publish_movie_tool_publishes_bdmv_directory(self, tmp_path, monkeypatch):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        bdmv_root = config.downloads_dir / "Example Movie Disc"
+        (bdmv_root / "BDMV" / "STREAM").mkdir(parents=True)
+        (bdmv_root / "BDMV" / "PLAYLIST").mkdir()
+        (bdmv_root / "BDMV" / "CLIPINF").mkdir()
+        (bdmv_root / "BDMV" / "index.bdmv").write_bytes(b"index")
+        (bdmv_root / "BDMV" / "MovieObject.bdmv").write_bytes(b"movie-object")
+        (bdmv_root / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"main")
+
+        with sf() as session:
+            from media_pilot.repository.models import MetadataDetail
+
+            task = _make_task(
+                session,
+                source_path=str(bdmv_root),
+                media_type="movie",
+                status="agent_running",
+                current_step="agent_running",
+            )
+            task_id = task.id
+            _make_candidate(session, task_id, confidence=0.95)
+            session.add(MetadataDetail(
+                task_id=task_id,
+                provider="tmdb",
+                provider_id="movie:123",
+                media_type="movie",
+                title="Example Movie",
+                original_title=None,
+                year=2026,
+                payload={
+                    "poster_url": "https://example.invalid/poster.jpg",
+                    "backdrop_url": None,
+                    "logo_url": None,
+                },
+            ))
+            session.commit()
+
+        def fake_download_image(_client, _url, path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"image")
+            return b"image"
+
+        monkeypatch.setattr(
+            "media_pilot.orchestration.jellyfin_movie_writer._download_image",
+            fake_download_image,
+        )
+
+        with sf() as session:
+            from media_pilot.agent.tools.base import ToolContext
+            from media_pilot.agent.tools.write import _handle_publish_movie_to_library
+
+            ctx = ToolContext(session=session, config=config, task_id=task_id)
+            result = _handle_publish_movie_to_library(ctx, {"task_id": task_id})
+            session.commit()
+
+        assert result.status == "success"
+        assert result.data["source_kind"] == "bdmv"
+
+        final_dir = config.movies_dir / "Example Movie (2026)"
+        assert (final_dir / "BDMV" / "index.bdmv").exists()
+        assert (final_dir / "BDMV" / "STREAM" / "00001.m2ts").read_bytes() == b"main"
+        assert (final_dir / "BDMV" / "index.nfo").exists()
+        assert (final_dir / "Example Movie (2026)-poster.jpg").exists()
+
+        with sf() as session:
+            from media_pilot.repository.repositories import IngestTaskRepository
+            task = IngestTaskRepository(session).get(task_id)
+            assert task.status == "library_import_complete"
+            assert task.current_step == "library_import_complete"
 
     def test_write_tools_registered_with_correct_permission(self):
         from media_pilot.agent.tools.base import PermissionLevel

@@ -130,7 +130,9 @@ Docker 部署中，目录变量表示**宿主机挂载路径**；容器内应用
 
 ## 输出结构
 
-电影默认写入 Jellyfin 风格目录：
+电影入库支持两类目录结构：
+
+单文件电影：
 
 ```text
 电影标题 (年份)/
@@ -139,6 +141,23 @@ Docker 部署中，目录变量表示**宿主机挂载路径**；容器内应用
   电影标题 (年份)-poster.jpg
   电影标题 (年份)-fanart.jpg
   电影标题 (年份)-clearlogo.png
+```
+
+已解包 BDMV 电影目录（不支持 `.iso` / `.img`）：
+
+```text
+电影标题 (年份)/
+  BDMV/
+    index.bdmv
+    MovieObject.bdmv
+    STREAM/
+    PLAYLIST/
+    CLIPINF/
+    index.nfo
+  CERTIFICATE/
+  poster.jpg
+  fanart.jpg
+  clearlogo.png
 ```
 
 剧集写入 `show / season / episode` 三层目录，并生成 `tvshow.nfo`、`season.nfo` 和 `episode.nfo`。

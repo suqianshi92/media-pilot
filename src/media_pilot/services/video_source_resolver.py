@@ -12,7 +12,8 @@ target_conflict_handler.handle_overwrite_target 都回退到 `task.source_path`
 2. 单视频目录时自动补写 `MediaSourceSelection` (自愈);
 3. 0 / 多个主视频时返回结构化错误 (留给上层创建决策或失败).
 
-不会返回目录路径给 `build_movie_write_plan` / `execute_movie_write`.
+文件电影不会返回目录路径给 `build_movie_write_plan` / `execute_movie_write`。
+BDMV 电影目录作为显式 `source_kind="bdmv"` 例外，由 writer 按目录树发布。
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from media_pilot.config import AppConfig
+from media_pilot.services.disc_input import resolve_bdmv_movie_source
 from media_pilot.services.task_input_analysis import (
     FileInfo,
     analyze_task_input,
@@ -36,7 +38,7 @@ logger = logging.getLogger(__name__)
 class VideoSourceResolveResult:
     """主视频解析结果.
 
-    - video_path: 已识别的实际主视频文件; 失败时为 None.
+    - video_path: 文件电影为实际主视频文件; BDMV 为任务输入目录.
     - error_code: 失败时的稳定字符串; 成功时为 None.
       已知值: "no_main_video" | "multiple_videos" | "source_missing" | "source_outside_safe_roots"
     - error_message: 人类可读的错误信息.
@@ -47,6 +49,7 @@ class VideoSourceResolveResult:
     error_code: str | None = None
     error_message: str | None = None
     created_selection: bool = False
+    source_kind: str = "file"
 
 
 def _build_selection_payload(
@@ -94,12 +97,13 @@ def resolve_main_video_for_publish(
     *,
     config: AppConfig,
 ) -> VideoSourceResolveResult:
-    """解析任务主视频文件, 永远不返回目录.
+    """解析电影发布源.
 
     优先级:
-    1. MediaSourceSelection 存在 + selected_path 是文件 → 用它.
-    2. task.source_path 是文件 → 用它.
-    3. task.source_path 是目录 → analyze_task_input:
+    1. BDMV 目录 → 返回 source_kind="bdmv" 的目录型 movie source.
+    2. MediaSourceSelection 存在 + selected_path 是文件 → 用它.
+    3. task.source_path 是文件 → 用它.
+    4. task.source_path 是目录 → analyze_task_input:
        - 0 主视频 → error "no_main_video".
        - 1 主视频 → 自动补写 MediaSourceSelection (input_path=task.source_path,
          selected_path=primary.path, payload=auxiliary/excluded/subtitles 事实),
@@ -107,12 +111,9 @@ def resolve_main_video_for_publish(
        - 2+ 主视频 → error "multiple_videos" (让用户重访 complex_input_decision).
 
     被 publish_movie_to_library 与 target_conflict_handler.handle_overwrite_target
-    共同使用, 杜绝把目录路径喂给 build_movie_write_plan / execute_movie_write.
+    共同使用, 杜绝把普通目录路径喂给 build_movie_write_plan / execute_movie_write.
     """
-    from media_pilot.repository.repositories import (
-        IngestTaskRepository,
-        MediaSourceSelectionRepository,
-    )
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
 
     if task is None:
         return VideoSourceResolveResult(
@@ -131,6 +132,42 @@ def resolve_main_video_for_publish(
 
     sel_repo = MediaSourceSelectionRepository(session)
     existing = sel_repo.get_for_task(task.id)
+
+    # BDMV movie directory: preserve the disc structure as an opaque movie
+    # source. Do this before single-video directory analysis because
+    # BDMV/STREAM may contain many .m2ts files that must not become candidates.
+    bdmv_source = resolve_bdmv_movie_source(source_path)
+    if bdmv_source is not None:
+        created_selection = False
+        if existing is None or not (
+            isinstance(existing.payload, dict)
+            and existing.payload.get("source_kind") == "bdmv"
+        ):
+            try:
+                sel_repo.save(
+                    task_id=task.id,
+                    input_path=str(source_path),
+                    selected_path=None,
+                    confidence=1.0,
+                    reason="auto_bdmv_movie_dir",
+                    payload={
+                        "selection_source": "auto_bdmv_movie_dir",
+                        "source_kind": "bdmv",
+                        "bdmv_dir": str(bdmv_source.bdmv_dir),
+                        "certificate_dir": (
+                            str(bdmv_source.certificate_dir)
+                            if bdmv_source.certificate_dir is not None else None
+                        ),
+                    },
+                )
+                created_selection = True
+            except Exception:
+                logger.exception("自动补写 BDMV MediaSourceSelection 失败: task=%s", task.id)
+        return VideoSourceResolveResult(
+            video_path=source_path,
+            created_selection=created_selection,
+            source_kind="bdmv",
+        )
 
     # 1. 已存在 selection 且 selected_path 是真实文件 → 优先复用.
     if existing and existing.selected_path:

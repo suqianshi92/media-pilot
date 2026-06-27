@@ -19,6 +19,7 @@ from media_pilot.config import AppConfig
 from media_pilot.orchestration.jellyfin_movie_writer import MovieWritePlanDraft
 from media_pilot.orchestration.jellyfin_show_writer import ShowWritePlanDraft
 from media_pilot.services.library_root_resolver import resolve_library_root
+from media_pilot.services.disc_input import resolve_bdmv_movie_source
 from media_pilot.services.task_input_analysis import FileInfo
 
 
@@ -149,7 +150,11 @@ def build_publish_plan_draft(
     source_path = Path(task.source_path)
     source_sel_repo = MediaSourceSelectionRepository(session)
     selection = source_sel_repo.get_for_task(task.id)
-    video_source = Path(selection.selected_path) if selection and selection.selected_path else source_path
+    video_source = (
+        Path(selection.selected_path)
+        if selection and selection.selected_path
+        else source_path
+    )
 
     plan = build_movie_write_plan(
         movies_dir=resolve_library_root(
@@ -160,6 +165,14 @@ def build_publish_plan_draft(
         task_id=task.id,
         provider=orm_detail.provider,
     )
+
+    if plan.source_kind == "bdmv" or resolve_bdmv_movie_source(video_source) is not None:
+        return PublishPlanDraft(
+            media_type="movie",
+            movie=plan,
+            subtitles=[],
+            warnings=[],
+        )
 
     # 字幕规划: 优先消费 MediaSourceSelection.payload.selected_subtitles
     # (用户已通过 select_subtitles 决策明确选择), 否则回退到 same-stem

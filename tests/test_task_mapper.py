@@ -131,6 +131,20 @@ def test_determine_file_format_from_selection_bdmv() -> None:
     assert result == "BDMV"
 
 
+def test_determine_file_format_from_bdmv_source_kind() -> None:
+    sel = MediaSourceSelection(
+        id=new_id(),
+        task_id="task-1",
+        input_path="/data/movie",
+        selected_path=None,
+        confidence=1.0,
+        reason="auto_bdmv_movie_dir",
+        payload={"source_kind": "bdmv", "bdmv_dir": "/data/movie/BDMV"},
+    )
+    result = _determine_file_format(sel, None)
+    assert result == "BDMV"
+
+
 def test_determine_file_format_from_download_content_path() -> None:
     dl = DownloadTaskSummary(
         id="dl-1",

@@ -505,6 +505,8 @@ def _handle_get_auto_ingest_eligibility(context: ToolContext, input_data: dict) 
         "is_single_file": result.is_single_file,
         "is_sample_or_trailer": result.is_sample_or_trailer,
         "is_bdmv_or_iso": result.is_bdmv_or_iso,
+        "is_bdmv_movie": result.is_bdmv_movie,
+        "is_iso_image": result.is_iso_image,
         "is_complex_directory": result.is_complex_directory,
         "candidate_count": result.candidate_count,
         "has_clear_winner": result.has_clear_winner,

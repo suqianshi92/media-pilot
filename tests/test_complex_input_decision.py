@@ -1,7 +1,7 @@
 """Tests for complex movie input analysis and decision generation.
 
 Section 6.1: 服务层测试覆盖单文件 ready、多主视频、样片排除、
-字幕不明确、无视频、疑似剧集/BDMV/ISO.
+字幕不明确、无视频、疑似剧集/ISO.
 
 The service is side-effect-free — no DB writes, no AgentDecisionRequest
 creation. Boundary cases are exercised by directly constructing
@@ -183,19 +183,19 @@ class TestNoVideos:
         assert result.reason == "no_video_files_found"
 
 
-# ── BDMV / ISO → unsupported / review_complex_input ────────────────
+# ── BDMV ready / ISO unsupported ────────────────────────────────────
 
 
 class TestBdmvIso:
-    def test_bdmv_directory_returns_unsupported(self, tmp_path: Path):
+    def test_bdmv_directory_returns_ready(self, tmp_path: Path):
         config = _make_config(tmp_path)
         config.downloads_dir.mkdir(parents=True, exist_ok=True)
         bdmv_root = config.downloads_dir / "MY_MOVIE"
         bdmv_root.mkdir()
-        (bdmv_root / "BDMV").mkdir()
+        (bdmv_root / "BDMV" / "STREAM").mkdir(parents=True)
+        (bdmv_root / "BDMV" / "index.bdmv").write_bytes(b"index")
         (bdmv_root / "CERTIFICATE").mkdir()
-        (bdmv_root / "STREAM").mkdir()
-        (bdmv_root / "STREAM" / "00001.m2ts").write_bytes(b"movie")
+        (bdmv_root / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"movie")
 
         from media_pilot.services.complex_input_decision import (
             prepare_complex_input_decision,
@@ -204,10 +204,10 @@ class TestBdmvIso:
         result = prepare_complex_input_decision(
             config=config, source_path=bdmv_root,
         )
-        assert result.status == "unsupported"
-        assert result.decision_type == "review_complex_input"
-        assert result.free_text_allowed is True
-        assert "bdmv_or_iso" in result.analysis.detected
+        assert result.status == "ready"
+        assert result.decision_type is None
+        assert result.reason == "bdmv_movie_ready"
+        assert "bdmv_movie_directory" in result.analysis.detected
 
     def test_iso_file_returns_unsupported(self, tmp_path: Path):
         config = _make_config(tmp_path)
@@ -224,7 +224,9 @@ class TestBdmvIso:
         )
         assert result.status == "unsupported"
         assert result.decision_type == "review_complex_input"
-        assert "bdmv_or_iso" in result.analysis.detected
+        assert result.free_text_allowed is False
+        assert result.reason == "iso_image_not_supported"
+        assert "iso_image" in result.analysis.detected
 
 
 # ── show structure → unsupported ────────────────────────────────────

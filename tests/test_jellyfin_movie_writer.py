@@ -43,6 +43,29 @@ def test_build_movie_write_plan_uses_jellyfin_movie_directory_name(tmp_path: Pat
     assert plan.nfo_path == plan.target_dir / "Example Movie (2026).nfo"
 
 
+def test_build_movie_write_plan_for_bdmv_uses_index_nfo_layout(tmp_path: Path) -> None:
+    detail = make_detail()
+    source_path = make_bdmv_source(tmp_path / "downloads" / "Example Movie Disc")
+
+    plan = build_movie_write_plan(
+        movies_dir=tmp_path / "movies",
+        source_path=source_path,
+        detail=detail,
+        task_id="task-bdmv",
+    )
+
+    assert plan.source_kind == "bdmv"
+    assert plan.target_dir == (
+        tmp_path / "movies" / ".media-pilot-staging" / "task-bdmv" / "Example Movie (2026)"
+    )
+    assert plan.target_file == plan.target_dir / "BDMV" / "index.bdmv"
+    assert plan.final_target_file == (
+        tmp_path / "movies" / "Example Movie (2026)" / "BDMV" / "index.bdmv"
+    )
+    assert plan.nfo_path == plan.target_dir / "BDMV" / "index.nfo"
+    assert plan.poster_path == plan.target_dir / "Example Movie (2026)-poster.jpg"
+
+
 def test_build_movie_write_plan_matches_expected_chinese_movie_layout(tmp_path: Path) -> None:
     detail = MetadataDetail(
         **{
@@ -456,6 +479,132 @@ def test_execute_movie_write_force_overwrite_replaces_existing_final_target_dir(
     nfo_in_final = plan.final_target_dir / plan.nfo_path.name
     assert nfo_in_final.exists()
     assert b"<movie>" in nfo_in_final.read_bytes()
+
+
+def test_execute_movie_write_publishes_bdmv_directory_layout(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    session_factory = create_session_factory(config)
+    source_path = make_bdmv_source(config.downloads_dir / "Example Movie Disc")
+    # 源里已有旧 index.nfo，发布后应被生成的 NFO 覆盖。
+    (source_path / "BDMV" / "index.nfo").write_text("stale nfo", encoding="utf-8")
+    (source_path / "download-site.txt").write_text("do not copy", encoding="utf-8")
+    detail = MetadataDetail(
+        **{
+            **make_detail().__dict__,
+            "images": MetadataImages(
+                poster_url="https://img.test/poster.jpg",
+                backdrop_url=None,
+                logo_url=None,
+            ),
+        }
+    )
+    client = make_http_client(
+        {"https://img.test/poster.jpg": httpx.Response(200, content=b"poster")}
+    )
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).create(
+            IngestTaskCreate(
+                source_path=str(source_path),
+                status="confirmed",
+                current_step="confirmed",
+                media_type="movie",
+            )
+        )
+        plan = build_movie_write_plan(
+            movies_dir=config.movies_dir,
+            source_path=source_path,
+            detail=detail,
+            task_id=task.id,
+        )
+        result = execute_movie_write(
+            session,
+            task_id=task.id,
+            source_path=source_path,
+            detail=detail,
+            plan=plan,
+            client=client,
+        )
+        session.commit()
+
+    assert result.status in {"succeeded", "warning"}
+    assert (plan.final_target_dir / "BDMV" / "index.bdmv").exists()
+    assert (plan.final_target_dir / "BDMV" / "MovieObject.bdmv").exists()
+    assert (plan.final_target_dir / "BDMV" / "STREAM" / "00001.m2ts").read_bytes() == b"main"
+    assert (plan.final_target_dir / "CERTIFICATE" / "id.bdmv").exists()
+    assert not (plan.final_target_dir / "download-site.txt").exists()
+    nfo = plan.final_target_dir / "BDMV" / "index.nfo"
+    assert nfo.exists()
+    assert "<title>Example Movie</title>" in nfo.read_text(encoding="utf-8")
+    assert "stale nfo" not in nfo.read_text(encoding="utf-8")
+    assert (plan.final_target_dir / "Example Movie (2026)-poster.jpg").read_bytes() == b"poster"
+
+
+def test_execute_movie_write_force_overwrite_replaces_bdmv_target_dir(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    session_factory = create_session_factory(config)
+    source_path = make_bdmv_source(config.downloads_dir / "Example Movie Disc")
+    detail = MetadataDetail(
+        **{
+            **make_detail().__dict__,
+            "images": MetadataImages(
+                poster_url="https://img.test/poster.jpg",
+                backdrop_url=None,
+                logo_url=None,
+            ),
+        }
+    )
+    client = make_http_client(
+        {"https://img.test/poster.jpg": httpx.Response(200, content=b"poster")}
+    )
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).create(
+            IngestTaskCreate(
+                source_path=str(source_path),
+                status="confirmed",
+                current_step="confirmed",
+                media_type="movie",
+            )
+        )
+        plan = build_movie_write_plan(
+            movies_dir=config.movies_dir,
+            source_path=source_path,
+            detail=detail,
+            task_id=task.id,
+        )
+        plan.final_target_dir.mkdir(parents=True)
+        stale = plan.final_target_dir / "stale.txt"
+        stale.write_text("stale", encoding="utf-8")
+
+        result = execute_movie_write(
+            session,
+            task_id=task.id,
+            source_path=source_path,
+            detail=detail,
+            plan=plan,
+            client=client,
+            force_overwrite=True,
+        )
+        session.commit()
+
+    assert result.status in {"succeeded", "warning"}
+    assert not stale.exists()
+    assert (plan.final_target_dir / "BDMV" / "STREAM" / "00001.m2ts").exists()
+
+
+def make_bdmv_source(root: Path) -> Path:
+    (root / "BDMV" / "STREAM").mkdir(parents=True)
+    (root / "BDMV" / "PLAYLIST").mkdir()
+    (root / "BDMV" / "CLIPINF").mkdir()
+    (root / "BDMV" / "index.bdmv").write_bytes(b"index")
+    (root / "BDMV" / "MovieObject.bdmv").write_bytes(b"movie-object")
+    (root / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"main")
+    (root / "CERTIFICATE").mkdir()
+    (root / "CERTIFICATE" / "id.bdmv").write_bytes(b"cert")
+    return root
 
 
 def make_detail() -> MetadataDetail:

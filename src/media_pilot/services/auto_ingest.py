@@ -14,6 +14,10 @@ from sqlalchemy.orm import Session
 from media_pilot.adapters.metadata import MetadataDetail
 from media_pilot.config import AppConfig
 from media_pilot.orchestration.auto_confirmation import has_clear_winner, pick_best_candidate
+from media_pilot.services.disc_input import (
+    is_iso_image as is_iso_image_path,
+    resolve_bdmv_movie_source,
+)
 from media_pilot.services.task_input_analysis import (
     FileInfo,
     analyze_task_input,
@@ -31,6 +35,8 @@ class EligibilityResult:
     is_single_file: bool = False
     is_sample_or_trailer: bool = False
     is_bdmv_or_iso: bool = False
+    is_bdmv_movie: bool = False
+    is_iso_image: bool = False
     is_complex_directory: bool = False
     candidate_count: int = 0
     has_clear_winner: bool = False
@@ -137,22 +143,22 @@ def check_eligibility(
 
     # ── safety hard gates ───────────────────────────────────────────
 
-    # Gate 1: BDMV / ISO detection
-    is_bdmv_or_iso = False
-    source_name_lower = source_path.name.lower()
-    if source_path.is_dir():
-        if any((source_path / f).exists() for f in ["BDMV", "CERTIFICATE"]):
-            is_bdmv_or_iso = True
-    if source_path.is_file() and source_path.suffix.lower() in (".iso", ".img"):
-        is_bdmv_or_iso = True
-
-    if is_bdmv_or_iso:
-        blocking.append("bdmv_or_iso_not_supported")
+    # Gate 1: BDMV / ISO detection. BDMV movie directories are supported as
+    # opaque disc inputs; ISO/IMG remains unsupported.
+    bdmv_source = resolve_bdmv_movie_source(source_path)
+    is_bdmv_movie = bdmv_source is not None
+    is_iso_source = is_iso_image_path(source_path)
+    if is_bdmv_movie:
+        facts["source_kind"] = "bdmv"
+        facts["bdmv_dir"] = str(bdmv_source.bdmv_dir)
+    if is_iso_source:
+        blocking.append("iso_image_not_supported")
         return EligibilityResult(
             eligible=False,
             media_type=task.media_type,
             video_count=analysis.video_count,
             is_bdmv_or_iso=True,
+            is_iso_image=True,
             blocking_reasons=blocking,
             warnings=warnings,
             task_facts=facts,
@@ -206,10 +212,10 @@ def check_eligibility(
     # 阻塞; 否则同季连续多集剧集会因 LLM 先调 eligibility 而被错判.
     if task.media_type and task.media_type not in ("movie", "show"):
         blocking.append(f"media_type_not_supported:{task.media_type}")
-    if analysis.video_count == 0 and not video_files:
+    if analysis.video_count == 0 and not video_files and not is_bdmv_movie:
         blocking.append("no_video_files_found")
     # 剧集允许多视频 (单集 / 同季连续多集); 仅在 movie 路径上拦截.
-    if task.media_type == "movie" and analysis.video_count > 1:
+    if task.media_type == "movie" and analysis.video_count > 1 and not is_bdmv_movie:
         blocking.append("multiple_video_files_not_supported")
 
     is_complex = analysis.is_directory and analysis.video_count > 1
@@ -364,7 +370,9 @@ def check_eligibility(
         video_count=analysis.video_count,
         is_single_file=not analysis.is_directory,
         is_sample_or_trailer=is_sample,
-        is_bdmv_or_iso=is_bdmv_or_iso,
+        is_bdmv_or_iso=is_bdmv_movie or is_iso_source,
+        is_bdmv_movie=is_bdmv_movie,
+        is_iso_image=is_iso_source,
         is_complex_directory=is_complex,
         candidate_count=len(candidates),
         has_clear_winner=has_winner,

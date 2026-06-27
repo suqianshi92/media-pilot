@@ -130,7 +130,9 @@ When `tpdb_adult_movie` is enabled, both `MEDIA_PILOT_TPDB_API_KEY` and a usable
 
 ## Output Layout
 
-Movies use a Jellyfin-style folder:
+Movie ingest now supports two output layouts:
+
+Single-file movie:
 
 ```text
 Movie Title (Year)/
@@ -139,6 +141,23 @@ Movie Title (Year)/
   Movie Title (Year)-poster.jpg
   Movie Title (Year)-fanart.jpg
   Movie Title (Year)-clearlogo.png
+```
+
+Unpacked BDMV movie directory (`.iso` / `.img` is not supported):
+
+```text
+Movie Title (Year)/
+  BDMV/
+    index.bdmv
+    MovieObject.bdmv
+    STREAM/
+    PLAYLIST/
+    CLIPINF/
+    index.nfo
+  CERTIFICATE/
+  poster.jpg
+  fanart.jpg
+  clearlogo.png
 ```
 
 Shows are written as `show / season / episode`, with `tvshow.nfo`, `season.nfo`, and `episode.nfo`.

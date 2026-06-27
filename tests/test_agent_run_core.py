@@ -1614,7 +1614,7 @@ class TestAutoIngestPromptBehavior:
             "type": "function",
             "function": {"name": "scan_task_files", "arguments": json.dumps({"task_id": task_id})},
         }])
-        # Step 3: request decision about complex input (e.g. multiple videos, BDMV detected)
+        # Step 3: request decision about complex input (e.g. multiple videos or ISO detected)
         mock.add_tool_calls([{
             "id": "call_dec",
             "type": "function",
@@ -2033,8 +2033,8 @@ class TestShowPathIntegration:
                 show_call.output["data"]["requires_metadata_detail"] is True
             )
 
-    def test_complex_input_keeps_bdmv_iso_as_unsupported(self, tmp_path):
-        """BDMV/ISO 输入仍走 review_complex_input 路径 — 硬失败边界."""
+    def test_complex_input_keeps_iso_as_unsupported(self, tmp_path):
+        """ISO 输入仍走 review_complex_input 路径 — 硬失败边界."""
         from media_pilot.agent.tools.base import ToolContext
         from media_pilot.agent.tools.complex_input import (
             _handle_prepare_complex_input_decision,
@@ -2049,17 +2049,13 @@ class TestShowPathIntegration:
         from tests.test_api_v1 import _make_session_factory
 
         config, _ = self._setup_show_dir(tmp_path)
-        # 准备 BDMV 目录
-        bdmv_dir = config.downloads_dir / "Some.Movie.2024"
-        bdmv_dir.mkdir()
-        (bdmv_dir / "BDMV").mkdir()
-        (bdmv_dir / "STREAM").mkdir()
-        (bdmv_dir / "CERTIFICATE").mkdir()
+        iso_path = config.downloads_dir / "Some.Movie.2024.iso"
+        iso_path.write_bytes(b"iso")
 
         sf = _make_session_factory(tmp_path)
         with sf() as session:
             task = IngestTaskRepository(session).create(IngestTaskCreate(
-                source_path=str(bdmv_dir), status="agent_running",
+                source_path=str(iso_path), status="agent_running",
                 current_step="agent_start", media_type="movie",
             ))
             run = AgentRunRepository(session).create(AgentRunCreate(
@@ -2080,7 +2076,7 @@ class TestShowPathIntegration:
 
             drs = AgentDecisionRequestRepository(session).list_pending_by_run(run_id)
 
-        # BDMV 必须创建 review_complex_input 决策, 不被新 show_like 旁路吞掉.
+        # ISO 必须创建 review_complex_input 决策, 不得进入发布路径.
         assert result.data.get("ready") is not True
         assert result.data.get("decision_requested") is True
         assert result.data["decision_type"] == "review_complex_input"

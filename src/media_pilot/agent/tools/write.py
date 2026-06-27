@@ -6,8 +6,6 @@ only exposed in auto_ingest mode through the tool whitelist.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from media_pilot.agent.tools.base import (
     PermissionLevel,
     ToolContext,
@@ -134,10 +132,11 @@ _PUBLISH_MOVIE_TO_LIBRARY_SCHEMA = {
 
 
 def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> ToolResult:
-    """Publish a single-file movie to the movie library.
+    """Publish a movie to the movie library.
 
     Safety hard gates enforced in code (not bypassable by Agent):
-    - Only supports movie tasks (refuses shows, BDMV/ISO, and multi-video directories)
+    - Only supports movie tasks (refuses shows, ISO/IMG, and multi-video directories)
+    - Supports single-file movies and unpacked BDMV movie directories
     - Blocks target conflicts (no overwrite)
     - Path must be within safe roots
     - At most one main video file
@@ -178,11 +177,11 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
             summary=f"Source path not found for task {task_id}",
         )
 
-    if "bdmv_or_iso_not_supported" in eligibility.blocking_reasons:
+    if "iso_image_not_supported" in eligibility.blocking_reasons:
         return ToolResult(
             status="failure",
-            summary="BDMV/ISO sources are not supported by auto publish",
-            data={"requires_user": True, "reason": "bdmv_or_iso"},
+            summary="ISO/IMG sources are not supported by auto publish",
+            data={"requires_user": True, "reason": "iso_image"},
         )
 
     if "sample_or_trailer_not_supported" in eligibility.blocking_reasons:
@@ -343,13 +342,17 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
         )
 
         dr_repo = AgentDecisionRequestRepository(context.session)
+        conflict_target = (
+            plan.final_target_dir
+            if plan.source_kind == "bdmv" else plan.final_target_file
+        )
         try:
             decision = dr_repo.create(AgentDecisionRequestCreate(
                 run_id=context.run_id,
                 task_id=task_id,
                 decision_type="target_conflict",
                 question=(
-                    f"目标 {plan.final_target_file} 已被占用（{conflict}）。"
+                    f"目标 {conflict_target} 已被占用（{conflict}）。"
                     "请选择处理方式。"
                 ),
                 free_text_allowed=False,
@@ -369,9 +372,10 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
                     "final_target_dir": str(plan.final_target_dir),
                     "final_target_file": str(plan.final_target_file),
                     "conflict": conflict,
+                    "source_kind": plan.source_kind,
                 },
             ))
-        except ValueError as exc:
+        except ValueError:
             # 已存在 pending 决策时不再重复创建
             return ToolResult(
                 status="failure",
@@ -397,6 +401,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
                 "conflict": conflict,
                 "final_target_dir": str(plan.final_target_dir),
                 "final_target_file": str(plan.final_target_file),
+                "source_kind": plan.source_kind,
             },
         )
 
@@ -432,6 +437,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
             summary=f"Movie published to library: {plan.final_target_dir}{warnings_text}",
             data={
                 "status": write_result.status,
+                "source_kind": plan.source_kind,
                 "final_target_dir": str(plan.final_target_dir),
                 "final_target_file": str(plan.final_target_file),
                 "warnings": write_result.warnings,
@@ -448,13 +454,17 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
         )
 
         dr_repo = AgentDecisionRequestRepository(context.session)
+        conflict_target = (
+            plan.final_target_dir
+            if plan.source_kind == "bdmv" else plan.final_target_file
+        )
         try:
             decision = dr_repo.create(AgentDecisionRequestCreate(
                 run_id=context.run_id,
                 task_id=task_id,
                 decision_type="target_conflict",
                 question=(
-                    f"目标 {plan.final_target_file} 在执行阶段出现冲突。"
+                    f"目标 {conflict_target} 在执行阶段出现冲突。"
                     "请选择处理方式。"
                 ),
                 free_text_allowed=False,
@@ -474,6 +484,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
                     "final_target_dir": str(plan.final_target_dir),
                     "final_target_file": str(plan.final_target_file),
                     "conflict": "execute_time_conflict",
+                    "source_kind": plan.source_kind,
                 },
             ))
         except ValueError:
@@ -494,6 +505,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
                 "decision_requested": True,
                 "decision_id": decision.id,
                 "decision_type": "target_conflict",
+                "source_kind": plan.source_kind,
             },
         )
 
@@ -518,7 +530,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
 def make_publish_movie_to_library() -> ToolDefinition:
     return ToolDefinition(
         name="publish_movie_to_library",
-        description="Publish a single-file movie to the Jellyfin movie library. Only supports movie tasks — refuses shows, BDMV/ISO, and multi-video directories. Copies same-stem subtitles alongside the video.",
+        description="Publish a movie to the Jellyfin movie library. Supports single-file movies and unpacked BDMV movie directories. Refuses shows, ISO/IMG, and unresolved multi-video movie directories. Copies same-stem subtitles for single-file movies.",
         parameters=_PUBLISH_MOVIE_TO_LIBRARY_SCHEMA,
         permission_level=PermissionLevel.WRITE,
         handler=_handle_publish_movie_to_library,

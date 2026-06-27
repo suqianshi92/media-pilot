@@ -98,7 +98,9 @@ def _determine_file_format(
     if source_selection is not None:
         selected_path = source_selection.selected_path
         payload = source_selection.payload or {}
-        bdmv_detected = bool(payload.get("bdmv_detected"))
+        bdmv_detected = bool(
+            payload.get("bdmv_detected") or payload.get("source_kind") == "bdmv"
+        )
 
     # 优先从主媒体选择结果判定
     if selected_path:
@@ -635,7 +637,9 @@ def _map_source_selection(selection: MediaSourceSelection | None) -> MediaSource
         selected_path=selection.selected_path,
         confidence=selection.confidence,
         reason=selection.reason,
-        bdmv_detected=bool(payload.get("bdmv_detected")),
+        bdmv_detected=bool(
+            payload.get("bdmv_detected") or payload.get("source_kind") == "bdmv"
+        ),
         stream_file_count=payload.get("stream_file_count"),
         candidate_files=[_make_candidate_file(p) for p in candidate_paths],
         excluded_files=[_make_candidate_file(p) for p in excluded_paths],
