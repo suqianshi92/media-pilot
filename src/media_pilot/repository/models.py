@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from media_pilot.repository.database import Base
@@ -20,7 +20,7 @@ class IngestTask(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     source_path: Mapped[str] = mapped_column(String(4096), nullable=False)
-    source_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    source_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     source_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     media_type: Mapped[str | None] = mapped_column(String(32))
@@ -62,8 +62,8 @@ class DownloadTask(Base):
     save_path: Mapped[str] = mapped_column(String(4096), nullable=False)
     content_path: Mapped[str | None] = mapped_column(String(4096))
     progress: Mapped[float] = mapped_column(Float, default=0.0)
-    download_speed_bytes_per_second: Mapped[int | None] = mapped_column(Integer)
-    upload_speed_bytes_per_second: Mapped[int | None] = mapped_column(Integer)
+    download_speed_bytes_per_second: Mapped[int | None] = mapped_column(BigInteger)
+    upload_speed_bytes_per_second: Mapped[int | None] = mapped_column(BigInteger)
     seeders: Mapped[int] = mapped_column(Integer, default=0)
     leechers: Mapped[int] = mapped_column(Integer, default=0)
     connections: Mapped[int | None] = mapped_column(Integer)
@@ -190,7 +190,7 @@ class FileAsset(Base):
     task_id: Mapped[str] = mapped_column(ForeignKey("ingest_tasks.id"), nullable=False)
     role: Mapped[str] = mapped_column(String(64), nullable=False)
     path: Mapped[str] = mapped_column(String(4096), nullable=False)
-    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     checksum: Mapped[str | None] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -233,7 +233,7 @@ class AppSetting(Base):
         String(8), nullable=False, default="zh"
     )
     suspicious_file_threshold_bytes: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=314572800
+        BigInteger, nullable=False, default=314572800
     )
     metadata_auto_confirm_confidence: Mapped[float] = mapped_column(Float, default=0.9)
     metadata_auto_confirm_margin: Mapped[float] = mapped_column(Float, default=0.08)
@@ -241,16 +241,16 @@ class AppSetting(Base):
         String(16), nullable=False, default="keep"
     )
     download_rate_limit_bytes_per_second: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
+        BigInteger, nullable=False, default=0
     )
     upload_rate_limit_bytes_per_second: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0
+        BigInteger, nullable=False, default=0
     )
     synced_download_rate_limit_bytes_per_second: Mapped[int | None] = mapped_column(
-        Integer
+        BigInteger
     )
     synced_upload_rate_limit_bytes_per_second: Mapped[int | None] = mapped_column(
-        Integer
+        BigInteger
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now

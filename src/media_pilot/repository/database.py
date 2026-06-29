@@ -113,13 +113,13 @@ def _ensure_sqlite_legacy_columns(conn) -> None:
     _ensure_column(conn, "download_tasks", "ingest_task_id", "TEXT")
     _ensure_column(conn, "app_settings", "preferred_metadata_language", "TEXT")
     _ensure_column(conn, "app_settings", "source_cleanup_policy", "TEXT")
-    _ensure_column(conn, "app_settings", "download_rate_limit_bytes_per_second", "INTEGER")
-    _ensure_column(conn, "app_settings", "upload_rate_limit_bytes_per_second", "INTEGER")
+    _ensure_column(conn, "app_settings", "download_rate_limit_bytes_per_second", "BIGINT")
+    _ensure_column(conn, "app_settings", "upload_rate_limit_bytes_per_second", "BIGINT")
     _ensure_column(
-        conn, "app_settings", "synced_download_rate_limit_bytes_per_second", "INTEGER"
+        conn, "app_settings", "synced_download_rate_limit_bytes_per_second", "BIGINT"
     )
     _ensure_column(
-        conn, "app_settings", "synced_upload_rate_limit_bytes_per_second", "INTEGER"
+        conn, "app_settings", "synced_upload_rate_limit_bytes_per_second", "BIGINT"
     )
     _ensure_column(conn, "ingest_tasks", "title", "TEXT")
     _ensure_column(conn, "ingest_tasks", "year", "INTEGER")

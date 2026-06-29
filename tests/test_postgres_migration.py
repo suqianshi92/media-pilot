@@ -89,6 +89,36 @@ def test_migrates_rows_without_real_data(tmp_path: Path) -> None:
         target_engine.dispose()
 
 
+def test_migrates_file_sizes_larger_than_postgres_integer(tmp_path: Path) -> None:
+    source = _init_source(tmp_path / "source")
+    large_size = 8 * 1024 * 1024 * 1024
+    source_engine, session = _session_for_sqlite(source)
+    try:
+        session.add(
+            IngestTask(
+                id="task-large",
+                source_path="/data/watch/large.mkv",
+                source_size_bytes=large_size,
+                status="library_import_complete",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+        source_engine.dispose()
+
+    target = tmp_path / "target.sqlite3"
+    migrate_sqlite_to_database(sqlite_path=source, database_url=_target_url(target))
+
+    target_engine, target_session = _session_for_sqlite(target)
+    try:
+        migrated_task = target_session.get(IngestTask, "task-large")
+        assert migrated_task.source_size_bytes == large_size
+    finally:
+        target_session.close()
+        target_engine.dispose()
+
+
 def test_migration_restores_cyclic_download_ingest_links(tmp_path: Path) -> None:
     source = _init_source(tmp_path / "source")
     source_engine, session = _session_for_sqlite(source)
