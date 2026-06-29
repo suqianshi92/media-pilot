@@ -12,7 +12,13 @@ from media_pilot.deployment.migrate_sqlite_to_postgres import (
     migrate_sqlite_to_database,
 )
 from media_pilot.repository.database import Base, initialize_database
-from media_pilot.repository.models import AgentRun, DownloadTask, IngestTask, MediaCandidate
+from media_pilot.repository.models import (
+    AgentRun,
+    DownloadTask,
+    IngestTask,
+    MediaCandidate,
+    OperationRecord,
+)
 
 
 def _config(root: Path) -> AppConfig:
@@ -196,6 +202,38 @@ def test_migration_marks_stale_active_run_when_requested(tmp_path: Path) -> None
         assert migrated_task.failure_reason == STALE_ACTIVE_ERROR
         assert migrated_run.status == "failed"
         assert migrated_run.error_message == STALE_ACTIVE_ERROR
+    finally:
+        target_session.close()
+        target_engine.dispose()
+
+
+def test_migration_nulls_orphan_nullable_file_asset_reference(tmp_path: Path) -> None:
+    source = _init_source(tmp_path / "source")
+    source_engine, session = _session_for_sqlite(source)
+    try:
+        session.add(
+            OperationRecord(
+                id="op-1",
+                task_id=None,
+                file_asset_id="missing-file-asset",
+                operation_type="cleanup",
+                permission_level="write",
+                status="completed",
+                details={},
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+        source_engine.dispose()
+
+    target = tmp_path / "target.sqlite3"
+    migrate_sqlite_to_database(sqlite_path=source, database_url=_target_url(target))
+
+    target_engine, target_session = _session_for_sqlite(target)
+    try:
+        migrated = target_session.get(OperationRecord, "op-1")
+        assert migrated.file_asset_id is None
     finally:
         target_session.close()
         target_engine.dispose()
