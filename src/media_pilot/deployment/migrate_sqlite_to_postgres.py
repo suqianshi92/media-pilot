@@ -39,6 +39,23 @@ NULLABLE_FK_COLUMNS = {
         "file_asset_id": "file_assets",
     },
 }
+REQUIRED_FK_COLUMNS = {
+    "media_candidates": {"task_id": "ingest_tasks"},
+    "episode_mappings": {"task_id": "ingest_tasks"},
+    "media_source_selections": {"task_id": "ingest_tasks"},
+    "search_keyword_records": {"task_id": "ingest_tasks"},
+    "metadata_details": {"task_id": "ingest_tasks"},
+    "write_plans": {"task_id": "ingest_tasks"},
+    "write_results": {"task_id": "ingest_tasks"},
+    "file_assets": {"task_id": "ingest_tasks"},
+    "agent_runs": {"task_id": "ingest_tasks"},
+    "agent_messages": {"run_id": "agent_runs"},
+    "agent_tool_calls": {"run_id": "agent_runs"},
+    "agent_decision_requests": {
+        "run_id": "agent_runs",
+        "task_id": "ingest_tasks",
+    },
+}
 
 
 def migrate_sqlite_to_database(
@@ -58,12 +75,10 @@ def migrate_sqlite_to_database(
         stale_task_ids = (
             _find_stale_active_task_ids(source_engine) if clean_stale_active_runs else set()
         )
-        existing_ids = _load_source_ids(source_engine)
         counts = _copy_all_tables(
             source_engine=source_engine,
             target_engine=target_engine,
             stale_task_ids=stale_task_ids,
-            existing_ids=existing_ids,
         )
         _restore_deferred_foreign_keys(source_engine=source_engine, target_engine=target_engine)
         return counts
@@ -123,17 +138,18 @@ def _copy_all_tables(
     source_engine: Engine,
     target_engine: Engine,
     stale_task_ids: set[str],
-    existing_ids: dict[str, set[str]],
 ) -> dict[str, int]:
     counts: dict[str, int] = {}
+    copied_ids: dict[str, set[str]] = {}
     with target_engine.begin() as target_conn:
         for table in _migration_tables():
             rows = list(_iter_rows_for_table(
-                source_engine, table.name, stale_task_ids, existing_ids
+                source_engine, table.name, stale_task_ids, copied_ids
             ))
             if rows:
                 target_conn.execute(table.insert(), rows)
             counts[table.name] = len(rows)
+            copied_ids[table.name] = {row["id"] for row in rows if row.get("id")}
     return counts
 
 
@@ -147,7 +163,7 @@ def _iter_rows_for_table(
     source_engine: Engine,
     table_name: str,
     stale_task_ids: set[str],
-    existing_ids: dict[str, set[str]],
+    copied_ids: dict[str, set[str]],
 ) -> Iterable[dict[str, Any]]:
     if table_name not in inspect(source_engine).get_table_names():
         return
@@ -164,25 +180,10 @@ def _iter_rows_for_table(
         }
         _apply_stale_active_cleanup(table_name, row, stale_task_ids)
         _defer_cycle_foreign_keys(table_name, row)
-        _null_orphan_nullable_foreign_keys(table_name, row, existing_ids)
+        if _has_orphan_required_foreign_key(table_name, row, copied_ids):
+            continue
+        _null_orphan_nullable_foreign_keys(table_name, row, copied_ids)
         yield row
-
-
-def _load_source_ids(engine: Engine) -> dict[str, set[str]]:
-    ids: dict[str, set[str]] = {}
-    for table_name in Base.metadata.tables:
-        if table_name not in inspect(engine).get_table_names():
-            ids[table_name] = set()
-            continue
-        if "id" not in _source_column_names(engine, table_name):
-            ids[table_name] = set()
-            continue
-        with engine.connect() as conn:
-            ids[table_name] = {
-                row[0]
-                for row in conn.execute(select(Base.metadata.tables[table_name].c.id))
-            }
-    return ids
 
 
 def _source_column_names(engine: Engine, table_name: str) -> set[str]:
@@ -253,12 +254,22 @@ def _defer_cycle_foreign_keys(table_name: str, row: dict[str, Any]) -> None:
             row[column_name] = None
 
 
+def _has_orphan_required_foreign_key(
+    table_name: str, row: dict[str, Any], copied_ids: dict[str, set[str]]
+) -> bool:
+    for column_name, referenced_table in REQUIRED_FK_COLUMNS.get(table_name, {}).items():
+        value = row.get(column_name)
+        if value and value not in copied_ids.get(referenced_table, set()):
+            return True
+    return False
+
+
 def _null_orphan_nullable_foreign_keys(
-    table_name: str, row: dict[str, Any], existing_ids: dict[str, set[str]]
+    table_name: str, row: dict[str, Any], copied_ids: dict[str, set[str]]
 ) -> None:
     for column_name, referenced_table in NULLABLE_FK_COLUMNS.get(table_name, {}).items():
         value = row.get(column_name)
-        if value and value not in existing_ids.get(referenced_table, set()):
+        if value and value not in copied_ids.get(referenced_table, set()):
             row[column_name] = None
 
 

@@ -13,7 +13,10 @@ from media_pilot.deployment.migrate_sqlite_to_postgres import (
 )
 from media_pilot.repository.database import Base, initialize_database
 from media_pilot.repository.models import (
+    AgentDecisionRequest,
+    AgentMessage,
     AgentRun,
+    AgentToolCall,
     DownloadTask,
     IngestTask,
     MediaCandidate,
@@ -237,6 +240,54 @@ def test_migration_nulls_orphan_nullable_file_asset_reference(tmp_path: Path) ->
     finally:
         target_session.close()
         target_engine.dispose()
+
+
+def test_migration_skips_orphan_agent_run_and_dependents(tmp_path: Path) -> None:
+    source = _init_source(tmp_path / "source")
+    source_engine, session = _session_for_sqlite(source)
+    try:
+        run = AgentRun(
+            id="orphan-run",
+            task_id="missing-task",
+            status="active",
+            current_step="agent_start",
+        )
+        message = AgentMessage(
+            id="orphan-message",
+            run_id="orphan-run",
+            role="assistant",
+            content="must be skipped",
+        )
+        tool_call = AgentToolCall(
+            id="orphan-tool",
+            run_id="orphan-run",
+            message_id="orphan-message",
+            tool_name="search_metadata",
+            input={},
+            status="completed",
+        )
+        decision = AgentDecisionRequest(
+            id="orphan-decision",
+            run_id="orphan-run",
+            task_id="missing-task",
+            decision_type="select_metadata_candidate",
+            status="pending",
+            options=[],
+            payload={},
+        )
+        session.add_all([run, message, tool_call, decision])
+        session.commit()
+    finally:
+        session.close()
+        source_engine.dispose()
+
+    target = tmp_path / "target.sqlite3"
+    counts = migrate_sqlite_to_database(sqlite_path=source, database_url=_target_url(target))
+
+    assert counts["agent_runs"] == 0
+    assert counts["agent_messages"] == 0
+    assert counts["agent_tool_calls"] == 0
+    assert counts["agent_decision_requests"] == 0
 
 
 def test_migration_refuses_non_empty_target(tmp_path: Path) -> None:
