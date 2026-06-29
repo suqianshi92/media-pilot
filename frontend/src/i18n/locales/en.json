@@ -87,6 +87,7 @@
     "next": "Next",
     "pageSize": "Per page",
     "pageSizeOption": "{{count}} items",
+    "pageLoadFailed": "Failed to load this page. Please try again later.",
     "total": "Total {{count}} items",
     "filter_all": "All",
     "filter_pending": "Pending",

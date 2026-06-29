@@ -1239,6 +1239,152 @@ describe('TaskListPage', () => {
     })
   })
 
+  it('keeps the current page visible while a new server page is loading', async () => {
+    const user = userEvent.setup()
+    const service = createMockTaskService()
+    service.reset()
+
+    const flows = Array.from({ length: 25 }, (_, i) => ({
+      id: `ingest:pending-page-${i}`,
+      flow_type: 'external_import' as const,
+      route_target: 'task_detail' as const,
+      ingest_task_id: `pending-page-${i}`,
+      download_task_id: null,
+      total_status: 'processing',
+      title: `待加载分页任务 ${i}`,
+      year: 2020,
+      media_type: 'movie' as const,
+      can_confirm: false,
+      file_format: null,
+      source_path: `/data/downloads/pending-page-${i}.mkv`,
+      created_at: '2026-05-01T00:00:00+08:00',
+      updated_at: '2026-05-01T00:00:00+08:00',
+      status_summary: {
+        status: 'processing' as const,
+        current_step: 'metadata_detail',
+        failure_reason: null,
+        confidence: 0.9,
+        confidence_level: 'high' as const,
+        latest_message: 'processing',
+      },
+      download_task: null,
+      agent_status_summary: null,
+    }))
+
+    let resolvePage2: (() => void) | undefined
+    const pagedService: TaskListService = {
+      ...service,
+      async listFlows(params: { filter?: string; page?: number; page_size?: number } = {}) {
+        const page = params.page ?? 1
+        const pageSize = params.page_size ?? 10
+        if (params.filter === 'all' && page === 2) {
+          await new Promise<void>((resolve) => {
+            resolvePage2 = resolve
+          })
+        }
+        const start = (page - 1) * pageSize
+        return {
+          status: 'success' as const,
+          data: { items: flows.slice(start, start + pageSize) },
+          messages: [],
+          meta: { page, page_size: pageSize, total: flows.length, filters: { filter: params.filter ?? 'all' } },
+        }
+      },
+    }
+    const listFlowsSpy = vi.spyOn(pagedService, 'listFlows')
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter initialEntries={['/tasks']}>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <TaskListPage service={pagedService} />
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getAllByText('待加载分页任务 0 (2020)').length).toBeGreaterThan(0)
+    })
+
+    const nextBtn = screen.getByRole('button', { name: '下一页' })
+    await user.click(nextBtn)
+
+    await waitFor(() => {
+      expect(listFlowsSpy.mock.calls.some((args) => args[0]?.page === 2)).toBe(true)
+    })
+
+    // 请求未完成时保留旧页内容, 不进入整页 skeleton / ErrorState.
+    expect(screen.getAllByText('待加载分页任务 0 (2020)').length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('待加载分页任务 10 (2020)').length).toBe(0)
+    expect(nextBtn).toBeDisabled()
+
+    resolvePage2?.()
+
+    await waitFor(() => {
+      expect(screen.getAllByText('待加载分页任务 10 (2020)').length).toBeGreaterThan(0)
+    })
+    expect(screen.queryAllByText('待加载分页任务 0 (2020)').length).toBe(0)
+  })
+
+  it('renders compact page numbers with ellipsis for large result sets', async () => {
+    const service = createMockTaskService()
+    service.reset()
+
+    const flows = Array.from({ length: 90 }, (_, i) => ({
+      id: `ingest:ellipsis-page-${i}`,
+      flow_type: 'external_import' as const,
+      route_target: 'task_detail' as const,
+      ingest_task_id: `ellipsis-page-${i}`,
+      download_task_id: null,
+      total_status: 'processing',
+      title: `省略号分页任务 ${i}`,
+      year: 2020,
+      media_type: 'movie' as const,
+      can_confirm: false,
+      file_format: null,
+      source_path: `/data/downloads/ellipsis-page-${i}.mkv`,
+      created_at: '2026-05-01T00:00:00+08:00',
+      updated_at: '2026-05-01T00:00:00+08:00',
+      status_summary: {
+        status: 'processing' as const,
+        current_step: 'metadata_detail',
+        failure_reason: null,
+        confidence: 0.9,
+        confidence_level: 'high' as const,
+        latest_message: 'processing',
+      },
+      download_task: null,
+      agent_status_summary: null,
+    }))
+
+    const pagedService: TaskListService = {
+      ...service,
+      async listFlows(params: { filter?: string; page?: number; page_size?: number } = {}) {
+        const page = params.page ?? 1
+        const pageSize = params.page_size ?? 10
+        const start = (page - 1) * pageSize
+        return {
+          status: 'success' as const,
+          data: { items: flows.slice(start, start + pageSize) },
+          messages: [],
+          meta: { page, page_size: pageSize, total: flows.length, filters: { filter: params.filter ?? 'all' } },
+        }
+      },
+    }
+
+    renderTaskListPage(pagedService)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('省略号分页任务 0 (2020)').length).toBeGreaterThan(0)
+    })
+
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '9' })).toBeInTheDocument()
+    expect(screen.getByText('…')).toBeInTheDocument()
+  })
+
   it('stat cards use global filter totals, not current page items (activeFilter=failed)', async () => {
     // 统一流程列表契约 收口: 4 个 StatCard 统计的是全
     // 局各 filter 的 total, 不得随当前 activeFilter / currentPage 变化.

@@ -87,6 +87,7 @@
     "next": "下一页",
     "pageSize": "每页",
     "pageSizeOption": "{{count}} 条",
+    "pageLoadFailed": "加载分页失败，请稍后重试",
     "total": "共 {{count}} 条",
     "filter_all": "全部",
     "filter_pending": "待确认",

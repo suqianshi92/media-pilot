@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -36,6 +36,17 @@ export type TaskListService = Pick<TaskService, 'listFlows' | 'tick' | 'retryDow
 // 任何"假装本地分页是全局分页"的写法都禁止出现.
 const DEFAULT_PAGE_SIZE = 10
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const TASK_LIST_COLUMN_CLASSES: Record<string, string> = {
+  total_status: 'w-[120px]',
+  title: 'w-[360px]',
+  agent: 'w-[130px]',
+  file_format: 'w-[90px]',
+  media_type: 'w-[90px]',
+  source: 'w-[100px]',
+  download: 'w-[140px]',
+  updated_at: 'w-[110px]',
+  actions: 'w-[160px]',
+}
 
 const filterKeys: Array<{ value: FlowFilter; key: string }> = [
   { value: 'all', key: 'taskList.filter_all' },
@@ -121,7 +132,7 @@ const taskColumns = (t: (key: string) => string): ColumnDef<FlowSummary, any>[] 
       const f = info.getValue()
       const titleText = formatTaskTitle(f)
       return (
-        <div className="max-w-[300px]">
+        <div className="min-w-0">
           <Link
             to={flowDetailHref(f)}
             className="font-medium text-surface-foreground hover:text-primary transition-colors block truncate"
@@ -421,6 +432,8 @@ export function TaskListPage({
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
+  const [requestedPage, setRequestedPage] = useState(1)
+  const [requestedPageSize, setRequestedPageSize] = useState(DEFAULT_PAGE_SIZE)
   const urlFilter = searchParams.get('filter')
   const activeFilter: FlowFilter = (urlFilter && filterKeys.some(o => o.value === urlFilter))
     ? urlFilter as FlowFilter
@@ -434,15 +447,17 @@ export function TaskListPage({
     }
     // 切换 filter 必须回到第 1 页, 旧 page 状态对新的 filter 无意义.
     setCurrentPage(1)
+    setRequestedPage(1)
   }
 
   const flowsQuery = useQuery({
-    queryKey: ['flows', activeFilter, currentPage, pageSize],
+    queryKey: ['flows', activeFilter, requestedPage, requestedPageSize],
     queryFn: () => service.listFlows({
       filter: activeFilter,
-      page: currentPage,
-      page_size: pageSize,
+      page: requestedPage,
+      page_size: requestedPageSize,
     }),
+    placeholderData: keepPreviousData,
   })
 
   // 4 个 StatCard 统计的是全局各 filter 的 total, 不得随当前页 items
@@ -467,6 +482,33 @@ export function TaskListPage({
 
   const queryClient = useQueryClient()
   const { showToast } = useToast()
+  const isPageTransition = currentPage !== requestedPage || pageSize !== requestedPageSize
+
+  useEffect(() => {
+    if (!isPageTransition || !flowsQuery.isSuccess || flowsQuery.isPlaceholderData) return
+    setCurrentPage(requestedPage)
+    setPageSize(requestedPageSize)
+  }, [
+    flowsQuery.isPlaceholderData,
+    flowsQuery.isSuccess,
+    isPageTransition,
+    requestedPage,
+    requestedPageSize,
+  ])
+
+  useEffect(() => {
+    if (!isPageTransition || !flowsQuery.isError) return
+    setRequestedPage(currentPage)
+    setRequestedPageSize(pageSize)
+    showToast(t('taskList.pageLoadFailed'), 'error')
+  }, [
+    currentPage,
+    flowsQuery.isError,
+    isPageTransition,
+    pageSize,
+    showToast,
+    t,
+  ])
 
   const deleteDownloadMutation = useMutation({
     mutationFn: (downloadId: string) => service.deleteDownload(downloadId),
@@ -529,7 +571,6 @@ export function TaskListPage({
   const allItems = useMemo((): FlowSummary[] => flowsQuery.data?.data.items ?? [], [flowsQuery.data])
   // 页面 total 走 /flows meta.total, 不得用 items.length.
   const totalCount = flowsQuery.data?.meta.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   // 自动轮询: ingest flow 走 mock tick 推进状态; download-only flow
   // 没有任何客户端副作用, 但必须触发列表 + 4 个 filter total 一起刷新.
@@ -576,7 +617,7 @@ export function TaskListPage({
     )
   }
 
-  if (flowsQuery.isError) {
+  if (flowsQuery.isError && !flowsQuery.data) {
     return (
       <div>
         <PageHeader title={t('taskList.title')} description={t('taskList.description')} />
@@ -643,9 +684,6 @@ export function TaskListPage({
             {t(option.key)}
           </Button>
         ))}
-        <span className="text-sm text-muted-foreground">
-          {t('taskList.total', { count: totalCount })}
-        </span>
       </PageToolbar>
 
       {allItems.length === 0 ? (
@@ -658,6 +696,20 @@ export function TaskListPage({
           columns={taskColumns(t)}
           data={allItems}
           disablePagination
+          columnClassNames={TASK_LIST_COLUMN_CLASSES}
+          tableClassName="min-w-[1200px] table-fixed"
+          serverPagination={{
+            page: currentPage,
+            pageSize,
+            total: totalCount,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            pending: isPageTransition,
+            onPageChange: (page) => setRequestedPage(page),
+            onPageSizeChange: (nextPageSize) => {
+              setRequestedPageSize(nextPageSize)
+              setRequestedPage(1)
+            },
+          }}
           renderMobileCard={(flow) => (
             <FlowCard
               flow={flow}
@@ -678,51 +730,6 @@ export function TaskListPage({
             onRetrySync: (downloadId: string) => retrySyncMutation.mutate(downloadId),
           }}
         />
-      )}
-
-      {/* 翻页控件 (外层维护, 透传给 /flows). 关闭 DataTable 内部分页,
-          避免在已由后端切过的 data 上再做一次本地切. */}
-      {totalCount > 0 && (
-        <div className="flex flex-col gap-3 mt-4 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-sm text-muted-foreground">
-            {t('taskList.page')} {currentPage} / {totalPages}
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <span>{t('taskList.pageSize')}</span>
-              <select
-                className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
-                value={pageSize}
-                onChange={(event) => {
-                  setPageSize(Number(event.target.value))
-                  setCurrentPage(1)
-                }}
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {t('taskList.pageSizeOption', { count: size })}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage <= 1}
-            >
-              {t('taskList.prev')}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setCurrentPage((p) => p + 1)}
-              disabled={currentPage >= totalPages}
-            >
-              {t('taskList.next')}
-            </Button>
-          </div>
-        </div>
       )}
 
       <ConfirmDialog
