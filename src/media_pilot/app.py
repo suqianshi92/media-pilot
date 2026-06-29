@@ -42,6 +42,7 @@ def _config_from_environment() -> AppConfig:
         movies_dir=_path_env("MEDIA_PILOT_MOVIES_DIR", "/data/library/movies"),
         shows_dir=_path_env("MEDIA_PILOT_SHOWS_DIR", "/data/library/shows"),
         database_dir=_path_env("MEDIA_PILOT_DATABASE_DIR", "/data/db"),
+        database_url=os.getenv("MEDIA_PILOT_DATABASE_URL") or None,
         ai_adapter=AdapterMode(os.getenv("MEDIA_PILOT_AI_ADAPTER", AdapterMode.NONE.value)),
         metadata_provider=MetadataProviderMode(
             os.getenv("MEDIA_PILOT_METADATA_PROVIDER", MetadataProviderMode.TMDB.value)

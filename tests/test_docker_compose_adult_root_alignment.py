@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 ENV_EXAMPLE_FILE = REPO_ROOT / ".env.example"
@@ -129,6 +128,38 @@ class TestComposeUsesPublishedImageByDefault:
     def test_media_pilot_image_documented_in_env_example(self) -> None:
         text = ENV_EXAMPLE_FILE.read_text(encoding="utf-8")
         assert "MEDIA_PILOT_IMAGE=" in text
+
+
+class TestPostgresComposeWiring:
+    def test_postgres_service_exists_and_is_health_gated(self) -> None:
+        import yaml
+
+        data = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8")) or {}
+        services = data.get("services") or {}
+        postgres = services.get("media-pilot-postgres") or {}
+        assert postgres.get("image") == "postgres:17-alpine"
+        assert "healthcheck" in postgres
+        depends_on = (services.get("media-pilot") or {}).get("depends_on") or {}
+        assert depends_on["media-pilot-postgres"]["condition"] == "service_healthy"
+
+    def test_media_pilot_receives_database_url(self) -> None:
+        import yaml
+
+        data = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8")) or {}
+        service = (data.get("services") or {}).get("media-pilot") or {}
+        env = service.get("environment") or {}
+        assert env["MEDIA_PILOT_DATABASE_URL"] == "${MEDIA_PILOT_DATABASE_URL}"
+
+    def test_postgres_variables_documented_in_env_example(self) -> None:
+        text = ENV_EXAMPLE_FILE.read_text(encoding="utf-8")
+        for expected in (
+            "POSTGRES_DATA_DIR=",
+            "POSTGRES_DB=",
+            "POSTGRES_USER=",
+            "POSTGRES_PASSWORD=",
+            "MEDIA_PILOT_DATABASE_URL=",
+        ):
+            assert expected in text
 
 
 class TestFrontendAssetsUseAppBasePath:

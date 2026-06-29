@@ -62,6 +62,7 @@ services:
       MEDIA_PILOT_QBITTORRENT_URL: ${MEDIA_PILOT_QBITTORRENT_URL}
       MEDIA_PILOT_QBITTORRENT_USERNAME: ${MEDIA_PILOT_QBITTORRENT_USERNAME}
       MEDIA_PILOT_QBITTORRENT_PASSWORD: ${MEDIA_PILOT_QBITTORRENT_PASSWORD}
+      MEDIA_PILOT_DATABASE_URL: ${MEDIA_PILOT_DATABASE_URL}
     volumes:
       - shared-secrets:/secrets:ro
       - ${MEDIA_PILOT_DOWNLOADS_DIR}:/data/downloads
@@ -77,6 +78,26 @@ services:
         condition: service_completed_successfully
       media-pilot-prowlarr-init:
         condition: service_completed_successfully
+      media-pilot-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - media-pilot-net
+
+  media-pilot-postgres:
+    image: postgres:17-alpine
+    container_name: media-pilot-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${POSTGRES_DATA_DIR}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
     networks:
       - media-pilot-net

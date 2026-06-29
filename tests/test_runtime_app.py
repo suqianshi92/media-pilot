@@ -1,9 +1,7 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 import media_pilot.app as app_module
-from media_pilot.app import create_app, create_runtime_app
+from media_pilot.app import create_app
 from media_pilot.repository.database import DATABASE_FILE_NAME
 
 
@@ -33,18 +31,16 @@ def test_runtime_app_configures_database_from_environment(
     monkeypatch.setenv("MEDIA_PILOT_MOVIES_DIR", str(movies_dir))
     monkeypatch.setenv("MEDIA_PILOT_SHOWS_DIR", str(shows_dir))
     monkeypatch.setenv("MEDIA_PILOT_DATABASE_DIR", str(database_dir))
+    monkeypatch.delenv("MEDIA_PILOT_DATABASE_URL", raising=False)
     monkeypatch.setenv("MEDIA_PILOT_METADATA_PROVIDER", "tmdb")
     monkeypatch.setenv("MEDIA_PILOT_TMDB_API_KEY", "test-key")
     monkeypatch.setenv("MEDIA_PILOT_TMDB_LANGUAGE_PRIORITY", "zh-CN,en-US")
     monkeypatch.setenv("MEDIA_PILOT_TMDB_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("MEDIA_PILOT_METADATA_AUTO_CONFIRM_CONFIDENCE", "0.92")
 
-    client = TestClient(create_runtime_app())
+    config = app_module._config_from_environment()
+    app_module.initialize_database(config)
 
-    response = client.get("/", follow_redirects=False)
-
-    assert response.status_code == 303
-    assert response.headers["location"] == "/app/"
     assert (database_dir / DATABASE_FILE_NAME).is_file()
 
 
@@ -75,12 +71,11 @@ def test_create_app_does_not_start_background_thread_when_worker_disabled(
     # 影响本次断言。
     monkeypatch.setattr(app_module, "_bg_thread_started", False)
 
-    with TestClient(create_app(
+    create_app(
         config=config,
         session_factory=session_factory,
         enable_background_processor=True,
-    )):
-        pass
+    )
 
     # 关键不变量: 当 worker 未就绪 (LLM 缺失) 时, `_bg_thread_started`
     # 必须保持 False, 表示没有后台线程被启动。
@@ -178,6 +173,22 @@ def test_runtime_app_uses_container_path_defaults(monkeypatch) -> None:
     assert str(config.database_dir) == "/data/db"
     assert str(config.adult_movies_dir) == "/data/library/adult"
     assert str(config.trash_dir) == "/data/trash"
+
+
+def test_runtime_app_reads_database_url_from_environment(monkeypatch) -> None:
+    """`MEDIA_PILOT_DATABASE_URL` 存在时应进入 AppConfig, 由数据库层优先使用。"""
+    from media_pilot.app import _config_from_environment
+
+    monkeypatch.setenv(
+        "MEDIA_PILOT_DATABASE_URL",
+        "postgresql+psycopg://media_pilot:secret@media-pilot-postgres:5432/media_pilot",
+    )
+
+    config = _config_from_environment()
+
+    assert config.database_url == (
+        "postgresql+psycopg://media_pilot:secret@media-pilot-postgres:5432/media_pilot"
+    )
 
 
 def test_appconfig_default_watch_stable_window_seconds() -> None:

@@ -35,6 +35,7 @@ class AppConfig:
     movies_dir: Path
     shows_dir: Path
     database_dir: Path
+    database_url: str | None = None
     # 成人影片库根 — 用于发布 `tpdb_adult_movie` 元数据档案结果.
     # 缺失时启用 TPDB 成人影片能力必须报错, 不得隐式 fallback 到
     # movies_dir. 用户可以显式把成人影片库根配成与常规电影库根相同.

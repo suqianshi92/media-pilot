@@ -115,7 +115,8 @@ Docker 部署中，目录变量表示**宿主机挂载路径**；容器内应用
 | `MEDIA_PILOT_SHOWS_DIR` | 剧集库根 |
 | `MEDIA_PILOT_ADULT_MOVIES_DIR` | 成人影片库根，可选 |
 | `MEDIA_PILOT_TRASH_DIR` | 源文件回收区目录 |
-| `MEDIA_PILOT_DATABASE_DIR` | SQLite 数据目录 |
+| `POSTGRES_DATA_DIR` | PostgreSQL 数据目录 |
+| `MEDIA_PILOT_DATABASE_URL` | 应用数据库连接 URL，默认连接 compose 内置 PostgreSQL |
 | `MEDIA_PILOT_LLM_API_KEY` / `BASE_URL` / `MODEL` | Agent LLM 配置 |
 | `MEDIA_PILOT_TMDB_API_KEY` | TMDB 元数据 |
 | `MEDIA_PILOT_TPDB_API_KEY` | TPDB 成人影片元数据，可选 |

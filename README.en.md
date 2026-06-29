@@ -115,7 +115,8 @@ In Docker deployments, directory variables are **host mount paths**. The applica
 | `MEDIA_PILOT_SHOWS_DIR` | Show library root |
 | `MEDIA_PILOT_ADULT_MOVIES_DIR` | Optional adult movie library root |
 | `MEDIA_PILOT_TRASH_DIR` | Source-file trash directory |
-| `MEDIA_PILOT_DATABASE_DIR` | SQLite database directory |
+| `POSTGRES_DATA_DIR` | PostgreSQL data directory |
+| `MEDIA_PILOT_DATABASE_URL` | Application database URL, defaults to the bundled PostgreSQL service |
 | `MEDIA_PILOT_LLM_API_KEY` / `BASE_URL` / `MODEL` | Agent LLM configuration |
 | `MEDIA_PILOT_TMDB_API_KEY` | TMDB metadata |
 | `MEDIA_PILOT_TPDB_API_KEY` | Optional TPDB adult metadata |

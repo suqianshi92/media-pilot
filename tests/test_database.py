@@ -3,7 +3,12 @@ from pathlib import Path
 from sqlalchemy import inspect, text
 
 from media_pilot.config import AppConfig
-from media_pilot.repository.database import Base, create_engine_from_config, initialize_database
+from media_pilot.repository.database import (
+    Base,
+    create_engine_from_config,
+    database_url_from_config,
+    initialize_database,
+)
 from media_pilot.repository.models import IngestTask
 
 
@@ -22,6 +27,27 @@ def test_create_engine_from_config_uses_sqlite_database_file(tmp_path: Path) -> 
     engine = create_engine_from_config(make_config(tmp_path))
 
     assert str(engine.url) == f"sqlite+pysqlite:///{tmp_path / 'media-pilot.sqlite3'}"
+
+
+def test_create_engine_from_config_uses_database_url_when_configured(tmp_path: Path) -> None:
+    cfg = make_config(tmp_path)
+    cfg = AppConfig(
+        downloads_dir=cfg.downloads_dir,
+        watch_dir=cfg.watch_dir,
+        workspace_dir=cfg.workspace_dir,
+        movies_dir=cfg.movies_dir,
+        shows_dir=cfg.shows_dir,
+        database_dir=cfg.database_dir,
+        database_url="postgresql+psycopg://media_pilot:secret@db:5432/media_pilot",
+    )
+
+    engine = create_engine_from_config(cfg)
+    try:
+        assert engine.dialect.name == "postgresql"
+        assert str(engine.url).startswith("postgresql+psycopg://media_pilot:***@db:5432")
+        assert database_url_from_config(cfg).startswith("postgresql+psycopg://")
+    finally:
+        engine.dispose()
 
 
 def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:

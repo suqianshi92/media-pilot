@@ -19,20 +19,62 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 启动流程：
 
-1. `media-pilot-init` 生成 Prowlarr API Key 与 qBittorrent WebUI 密码，写入 `/data/shared-secrets.env`，并同步到 Prowlarr / qB 配置文件。
-2. `media-pilot-prowlarr-init` 等 Prowlarr API 可用后幂等创建默认公共 indexer。
-3. `media-pilot` 等两个 one-shot init 服务成功完成后启动。
+1. `media-pilot-postgres` 启动并通过 healthcheck。
+2. `media-pilot-init` 生成 Prowlarr API Key 与 qBittorrent WebUI 密码，写入 `/data/shared-secrets.env`，并同步到 Prowlarr / qB 配置文件。
+3. `media-pilot-prowlarr-init` 等 Prowlarr API 可用后幂等创建默认公共 indexer。
+4. `media-pilot` 等 PostgreSQL 和两个 one-shot init 服务就绪后启动。
 
 反复 `docker compose down && docker compose up -d` 时，凭据与已创建 indexer 会保留；用户在 Prowlarr UI 中调整过的 indexer 不会被覆盖。
 
 Compose 关键约束：
 
-- 下载目录只读挂载
-- 工作区、媒体库、数据库目录可写
+- 下载、watch、工作区、媒体库、数据库目录均需要可写；源文件清理策略会移动 watch/downloads 下的任务输入节点
 - `.env` 中的目录变量表示宿主机挂载路径；容器内应用路径固定为 `/data/...`
 - 源文件回收区挂载到容器内 `/data/trash`，建议与下载、watch、媒体库目录隔离
+- PostgreSQL 是默认生产数据库；`MEDIA_PILOT_DATABASE_URL` 默认连接 compose 内的 `media-pilot-postgres`
 - LLM / TMDB / TPDB API Key 通过环境变量注入
 - Prowlarr API Key 与 qBittorrent WebUI 密码由 `media-pilot-init` 接管
+
+## 数据库
+
+默认 compose 使用 PostgreSQL。相关变量：
+
+```dotenv
+POSTGRES_DATA_DIR=./data/postgres
+POSTGRES_DB=media_pilot
+POSTGRES_USER=media_pilot
+POSTGRES_PASSWORD=change-this-postgres-password
+MEDIA_PILOT_DATABASE_URL=postgresql+psycopg://media_pilot:change-this-postgres-password@media-pilot-postgres:5432/media_pilot
+```
+
+`MEDIA_PILOT_DATABASE_DIR` 仍保留给 SQLite 回退和旧库迁移使用。未设置 `MEDIA_PILOT_DATABASE_URL` 时，应用会回退到 `MEDIA_PILOT_DATABASE_DIR/media-pilot.sqlite3`。
+
+### 从 SQLite 迁移到 PostgreSQL
+
+迁移前先停止应用并备份旧库：
+
+```bash
+docker compose stop media-pilot
+cp ./data/db/media-pilot.sqlite3 ./data/db/media-pilot.sqlite3.bak
+```
+
+启动 PostgreSQL：
+
+```bash
+docker compose up -d media-pilot-postgres
+```
+
+执行迁移：
+
+```bash
+docker compose run --rm media-pilot \
+  sh -lc 'python -m media_pilot.deployment.migrate_sqlite_to_postgres \
+  --sqlite-path /data/db/media-pilot.sqlite3 \
+  --database-url "$MEDIA_PILOT_DATABASE_URL" \
+  --clean-stale-active-runs'
+```
+
+迁移脚本只读取 SQLite 文件，不会修改旧库。`--clean-stale-active-runs` 会把旧库里因 SQLite 锁残留的 `active` / `agent_running` 迁为失败态，避免新库继续显示卡住。
 
 ## Prowlarr Indexer
 
