@@ -19,6 +19,7 @@ from media_pilot.orchestration.jellyfin_movie_writer import (
 )
 from media_pilot.repository.database import create_session_factory, initialize_database
 from media_pilot.repository.models import (
+    FileAsset,
     OperationRecord,
     WriteResult,
 )
@@ -397,6 +398,103 @@ def test_execute_movie_write_reports_progress_steps_in_order(tmp_path: Path) -> 
         "copy_to_staging",
         "publish_to_library",
     ]
+
+
+def test_execute_movie_write_adds_jellyfin_directory_level_metadata_aliases(
+    tmp_path: Path,
+) -> None:
+    """单文件电影发布必须写 Jellyfin 稳定识别的目录级别名。
+
+    源文件带质量后缀时, 视频文件名会变成
+    ``Example Movie (2026) - 1080p BluRay.mkv``。如果只写
+    ``Example Movie (2026).nfo`` / ``Example Movie (2026)-poster.jpg``,
+    Jellyfin 可能不会把它们关联到该视频。额外写 ``movie.nfo`` /
+    ``poster.jpg`` / ``fanart.jpg`` 可以避免 stem 不一致导致的识别不稳。
+    """
+    config = make_config(tmp_path)
+    session_factory = create_session_factory(config)
+    source_path = config.downloads_dir / "Example.Movie.2026.1080p.BluRay.mkv"
+    source_path.write_bytes(b"movie-bytes")
+    detail = MetadataDetail(
+        **{
+            **make_detail().__dict__,
+            "images": MetadataImages(
+                poster_url="https://img.test/poster.jpg",
+                backdrop_url="https://img.test/fanart.jpg",
+                logo_url=None,
+            ),
+        }
+    )
+    client = make_http_client(
+        {
+            "https://img.test/poster.jpg": httpx.Response(200, content=b"poster"),
+            "https://img.test/fanart.jpg": httpx.Response(200, content=b"fanart"),
+        }
+    )
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).create(
+            IngestTaskCreate(
+                source_path=str(source_path),
+                status="confirmed",
+                current_step="confirmed",
+                media_type="movie",
+            )
+        )
+        plan = build_movie_write_plan(
+            movies_dir=config.movies_dir,
+            source_path=source_path,
+            detail=detail,
+            task_id=task.id,
+        )
+        result = execute_movie_write(
+            session,
+            task_id=task.id,
+            source_path=source_path,
+            detail=detail,
+            plan=plan,
+            client=client,
+        )
+        session.commit()
+
+        assets = session.scalars(
+            select(FileAsset).where(FileAsset.task_id == task.id)
+        ).all()
+        operations = session.scalars(
+            select(OperationRecord).where(OperationRecord.task_id == task.id)
+        ).all()
+        write_result = session.scalars(
+            select(WriteResult).where(WriteResult.task_id == task.id)
+        ).one()
+
+    assert result.status == "warning"  # clearlogo 缺失仍然是非阻塞 warning
+    assert plan.final_target_file.name == "Example Movie (2026) - 1080p BluRay.mkv"
+
+    legacy_nfo = plan.final_target_dir / "Example Movie (2026).nfo"
+    movie_nfo = plan.final_target_dir / "movie.nfo"
+    legacy_poster = plan.final_target_dir / "Example Movie (2026)-poster.jpg"
+    poster_alias = plan.final_target_dir / "poster.jpg"
+    legacy_fanart = plan.final_target_dir / "Example Movie (2026)-fanart.jpg"
+    fanart_alias = plan.final_target_dir / "fanart.jpg"
+
+    assert legacy_nfo.exists()
+    assert movie_nfo.read_bytes() == legacy_nfo.read_bytes()
+    assert legacy_poster.read_bytes() == b"poster"
+    assert poster_alias.read_bytes() == b"poster"
+    assert legacy_fanart.read_bytes() == b"fanart"
+    assert fanart_alias.read_bytes() == b"fanart"
+
+    asset_paths = {Path(asset.path).name for asset in assets}
+    assert {"movie.nfo", "poster.jpg", "fanart.jpg"} <= asset_paths
+    operation_types = {operation.operation_type for operation in operations}
+    assert {
+        "write_movie_nfo_alias",
+        "write_poster_alias",
+        "write_fanart_alias",
+    } <= operation_types
+    assert write_result.payload["movie_nfo_path"].endswith("/movie.nfo")
+    assert write_result.payload["poster_alias_path"].endswith("/poster.jpg")
+    assert write_result.payload["fanart_alias_path"].endswith("/fanart.jpg")
 
 
 def test_execute_movie_write_force_overwrite_replaces_existing_final_target_dir(

@@ -46,8 +46,11 @@ class MovieWritePlanDraft:
     final_target_dir: Path
     final_target_file: Path
     nfo_path: Path
+    movie_nfo_path: Path | None
     poster_path: Path
+    poster_alias_path: Path | None
     fanart_path: Path
+    fanart_alias_path: Path | None
     clearlogo_path: Path
 
 
@@ -101,6 +104,7 @@ def build_movie_write_plan(
         target_file = target_dir / "BDMV" / "index.bdmv"
         final_target_file = final_target_dir / "BDMV" / "index.bdmv"
         nfo_path = target_dir / "BDMV" / "index.nfo"
+        movie_nfo_path = None
     else:
         raw_file_stem = (
             directory_name
@@ -111,8 +115,11 @@ def build_movie_write_plan(
         target_file = target_dir / f"{file_stem}{source_path.suffix}"
         final_target_file = final_target_dir / f"{file_stem}{source_path.suffix}"
         nfo_path = target_dir / f"{directory_name}.nfo"
+        movie_nfo_path = target_dir / "movie.nfo"
     poster_path = target_dir / f"{directory_name}-poster.jpg"
+    poster_alias_path = None if source_kind == "bdmv" else target_dir / "poster.jpg"
     fanart_path = target_dir / f"{directory_name}-fanart.jpg"
+    fanart_alias_path = None if source_kind == "bdmv" else target_dir / "fanart.jpg"
     clearlogo_path = target_dir / f"{directory_name}-clearlogo.png"
     return MovieWritePlanDraft(
         source_kind=source_kind,
@@ -121,8 +128,11 @@ def build_movie_write_plan(
         final_target_dir=final_target_dir,
         final_target_file=final_target_file,
         nfo_path=nfo_path,
+        movie_nfo_path=movie_nfo_path,
         poster_path=poster_path,
+        poster_alias_path=poster_alias_path,
         fanart_path=fanart_path,
+        fanart_alias_path=fanart_alias_path,
         clearlogo_path=clearlogo_path,
     )
 
@@ -196,6 +206,9 @@ def execute_movie_write(
             "poster_path": str(plan.poster_path),
             "fanart_path": str(plan.fanart_path),
             "clearlogo_path": str(plan.clearlogo_path),
+            "movie_nfo_path": None if plan.movie_nfo_path is None else str(plan.movie_nfo_path),
+            "poster_alias_path": None if plan.poster_alias_path is None else str(plan.poster_alias_path),
+            "fanart_alias_path": None if plan.fanart_alias_path is None else str(plan.fanart_alias_path),
             "conflict": conflict,
             "force_overwrite": force_overwrite,
         },
@@ -274,6 +287,15 @@ def execute_movie_write(
         role="library_nfo",
         operation_type="write_nfo",
     )
+    if plan.movie_nfo_path is not None:
+        _write_generated_file(
+            session,
+            task_id=task_id,
+            path=plan.movie_nfo_path,
+            content=nfo_bytes,
+            role="library_nfo",
+            operation_type="write_movie_nfo_alias",
+        )
 
     required_image = _download_image(client, detail.images.poster_url, plan.poster_path)
     if required_image is not None:
@@ -284,6 +306,15 @@ def execute_movie_write(
             role="library_poster",
             operation_type="download_poster",
         )
+        if plan.poster_alias_path is not None:
+            _write_generated_file(
+                session,
+                task_id=task_id,
+                path=plan.poster_alias_path,
+                content=required_image,
+                role="library_poster",
+                operation_type="write_poster_alias",
+            )
     else:
         WriteResultRepository(session).save(
             task_id,
@@ -292,23 +323,28 @@ def execute_movie_write(
         )
         return MovieWriteResult(status="failed", warnings=warnings)
 
-    for url, path, role, operation_type, warning_code in (
+    for url, path, alias_path, role, operation_type, alias_operation_type, warning_code in (
         (
             detail.images.backdrop_url,
             plan.fanart_path,
+            plan.fanart_alias_path,
             "library_fanart",
             "download_fanart",
+            "write_fanart_alias",
             "fanart_download_failed",
         ),
         (
             detail.images.logo_url,
             plan.clearlogo_path,
+            None,
             "library_clearlogo",
             "download_clearlogo",
+            None,
             "clearlogo_download_failed",
         ),
     ):
-        if _download_image(client, url, path) is None:
+        downloaded = _download_image(client, url, path)
+        if downloaded is None:
             warnings.append(warning_code)
             continue
         _record_generated_asset(
@@ -318,6 +354,15 @@ def execute_movie_write(
             role=role,
             operation_type=operation_type,
         )
+        if alias_path is not None and alias_operation_type is not None:
+            _write_generated_file(
+                session,
+                task_id=task_id,
+                path=alias_path,
+                content=downloaded,
+                role=role,
+                operation_type=alias_operation_type,
+            )
 
     if plan.source_kind == "file":
         plan.target_file.parent.mkdir(parents=True, exist_ok=True)
@@ -439,6 +484,7 @@ def execute_movie_write(
                 "target_dir": str(plan.target_dir),
                 "target_file": str(plan.target_file),
                 "nfo_path": str(plan.nfo_path),
+                "movie_nfo_path": None if plan.movie_nfo_path is None else str(plan.movie_nfo_path),
                 "source_kind": plan.source_kind,
             },
         )
@@ -459,6 +505,23 @@ def execute_movie_write(
             "target_dir": str(plan.final_target_dir),
             "target_file": str(plan.final_target_file),
             "nfo_path": str(plan.final_target_dir / plan.nfo_path.relative_to(plan.target_dir)),
+            "movie_nfo_path": (
+                None
+                if plan.movie_nfo_path is None
+                else str(plan.final_target_dir / plan.movie_nfo_path.relative_to(plan.target_dir))
+            ),
+            "poster_path": str(plan.final_target_dir / plan.poster_path.relative_to(plan.target_dir)),
+            "poster_alias_path": (
+                None
+                if plan.poster_alias_path is None
+                else str(plan.final_target_dir / plan.poster_alias_path.relative_to(plan.target_dir))
+            ),
+            "fanart_path": str(plan.final_target_dir / plan.fanart_path.relative_to(plan.target_dir)),
+            "fanart_alias_path": (
+                None
+                if plan.fanart_alias_path is None
+                else str(plan.final_target_dir / plan.fanart_alias_path.relative_to(plan.target_dir))
+            ),
             "source_kind": plan.source_kind,
             "warnings": warnings,
         },
