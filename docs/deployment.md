@@ -43,8 +43,8 @@ Compose 关键约束：
 POSTGRES_DATA_DIR=./data/postgres
 POSTGRES_DB=media_pilot
 POSTGRES_USER=media_pilot
-POSTGRES_PASSWORD=change-this-postgres-password
-MEDIA_PILOT_DATABASE_URL=postgresql+psycopg://media_pilot:change-this-postgres-password@media-pilot-postgres:5432/media_pilot
+POSTGRES_PASSWORD=media_pilot
+MEDIA_PILOT_DATABASE_URL=postgresql+psycopg://media_pilot:media_pilot@media-pilot-postgres:5432/media_pilot
 ```
 
 `MEDIA_PILOT_DATABASE_DIR` 仍保留给 SQLite 回退和旧库迁移使用。未设置 `MEDIA_PILOT_DATABASE_URL` 时，应用会回退到 `MEDIA_PILOT_DATABASE_DIR/media-pilot.sqlite3`。
