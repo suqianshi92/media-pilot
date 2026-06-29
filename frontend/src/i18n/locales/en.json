@@ -85,6 +85,8 @@
     "page": "Page",
     "prev": "Prev",
     "next": "Next",
+    "pageSize": "Per page",
+    "pageSizeOption": "{{count}} items",
     "total": "Total {{count}} items",
     "filter_all": "All",
     "filter_pending": "Pending",

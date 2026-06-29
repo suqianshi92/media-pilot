@@ -96,7 +96,7 @@ describe('TaskListPage', () => {
   it('paginates tasks and allows switching pages', async () => {
     // 统一流程列表契约: 任务列表维护 React 翻页
     // state, 翻页必须触发 listFlows(page=N) 而不是本地切. 默认 mock
-    // 只有 12 条 flow < PAGE_SIZE=15, 不会渲染翻页控件, 所以这个 case
+    // 只有 12 条 flow 接近默认 page_size=10, 这个 case
     // 走 pagedService 强制制造 25 条, 验证翻页控件与 page state 联动.
     const user = userEvent.setup()
     const service = createMockTaskService()
@@ -155,21 +155,21 @@ describe('TaskListPage', () => {
       </MemoryRouter>,
     )
 
-    // 第 1 页: 第 0-14 条
+    // 第 1 页: 第 0-9 条
     await waitFor(() => {
       expect(screen.getAllByText('翻页任务 0 (2020)').length).toBeGreaterThan(0)
     })
-    // 第 16 条在第 2 页才能看到
-    expect(screen.queryAllByText('翻页任务 16 (2020)').length).toBe(0)
+    // 第 10 条在第 2 页才能看到
+    expect(screen.queryAllByText('翻页任务 10 (2020)').length).toBe(0)
 
     const nextBtn = screen.getByRole('button', { name: '下一页' })
     expect(nextBtn).toBeInTheDocument()
 
     await user.click(nextBtn)
 
-    // 第 2 页: 第 15-24 条
+    // 第 2 页: 第 10-19 条
     await waitFor(() => {
-      expect(screen.getAllByText('翻页任务 15 (2020)').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('翻页任务 10 (2020)').length).toBeGreaterThan(0)
     })
     // 第 1 页的内容必须不再渲染
     expect(screen.queryAllByText('翻页任务 0 (2020)').length).toBe(0)
@@ -361,15 +361,20 @@ describe('TaskListPage', () => {
   })
 
   it('shows 已下载 for completed download tasks', async () => {
+    const user = userEvent.setup()
     renderTaskListPage()
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
     })
 
+    await user.selectOptions(screen.getByLabelText('每页'), '20')
+
     // dl-completed（有 ingest_task_id → task-completed）的下载状态列应显示 已下载
-    const labels = screen.getAllByText('已下载')
-    expect(labels.length).toBeGreaterThan(0)
+    await waitFor(() => {
+      const labels = screen.getAllByText('已下载')
+      expect(labels.length).toBeGreaterThan(0)
+    })
   })
 
   it('shows — when row has no download task', async () => {
@@ -1130,6 +1135,7 @@ describe('TaskListPage', () => {
     })
     const firstCallArgs = listFlowsSpy.mock.calls[0]?.[0] ?? {}
     expect(firstCallArgs.page ?? 1).toBe(1)
+    expect(firstCallArgs.page_size).toBe(10)
     // 不得再用 200 假装全局分页
     expect(firstCallArgs.page_size === 200).toBe(false)
 
@@ -1153,6 +1159,83 @@ describe('TaskListPage', () => {
       )
       expect(lastFilterCall).toBeDefined()
       expect((lastFilterCall?.[0] as { page?: number })?.page ?? 1).toBe(1)
+    })
+  })
+
+  it('allows changing server page size and resets to page 1', async () => {
+    const user = userEvent.setup()
+    const service = createMockTaskService()
+    service.reset()
+
+    const flows = Array.from({ length: 55 }, (_, i) => ({
+      id: `ingest:page-size-${i}`,
+      flow_type: 'external_import' as const,
+      route_target: 'task_detail' as const,
+      ingest_task_id: `page-size-${i}`,
+      download_task_id: null,
+      total_status: 'processing',
+      title: `每页任务 ${i}`,
+      year: 2020,
+      media_type: 'movie' as const,
+      can_confirm: false,
+      file_format: null,
+      source_path: `/data/downloads/page-size-${i}.mkv`,
+      created_at: '2026-05-01T00:00:00+08:00',
+      updated_at: '2026-05-01T00:00:00+08:00',
+      status_summary: {
+        status: 'processing' as const,
+        current_step: 'metadata_detail',
+        failure_reason: null,
+        confidence: 0.9,
+        confidence_level: 'high' as const,
+        latest_message: 'processing',
+      },
+      download_task: null,
+      agent_status_summary: null,
+    }))
+
+    const pagedService: TaskListService = {
+      ...service,
+      async listFlows(params: { filter?: string; page?: number; page_size?: number } = {}) {
+        const page = params.page ?? 1
+        const pageSize = params.page_size ?? 10
+        const start = (page - 1) * pageSize
+        return {
+          status: 'success' as const,
+          data: { items: flows.slice(start, start + pageSize) },
+          messages: [],
+          meta: { page, page_size: pageSize, total: flows.length, filters: { filter: params.filter ?? 'all' } },
+        }
+      },
+    }
+    const listFlowsSpy = vi.spyOn(pagedService, 'listFlows')
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter initialEntries={['/tasks']}>
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <TaskListPage service={pagedService} />
+          </ToastProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getAllByText('每页任务 0 (2020)').length).toBeGreaterThan(0)
+    })
+
+    await user.click(screen.getByRole('button', { name: '下一页' }))
+    await waitFor(() => {
+      expect(listFlowsSpy.mock.calls.some((args) => args[0]?.page === 2)).toBe(true)
+    })
+
+    await user.selectOptions(screen.getByLabelText('每页'), '50')
+
+    await waitFor(() => {
+      expect(listFlowsSpy.mock.calls.some((args) => (
+        args[0]?.page === 1 && args[0]?.page_size === 50
+      ))).toBe(true)
     })
   })
 
@@ -1287,7 +1370,7 @@ describe('TaskListPage', () => {
     const service = createMockTaskService()
     service.reset()
 
-    // 25 条 processing flow, 每页 15 条 → 第 2 页 10 条.
+    // 25 条 processing flow, 每页 10 条 → 第 2 页 10 条.
     // filter totals 设成: waiting=7, processing=25, completed=3, failed=2.
     // 用统一的 listFlows mock: page_size=1 时 meta.total 按 filter
     // 返回 (即 meta.total 充当 filter total), page_size>1 时按
@@ -1332,7 +1415,7 @@ describe('TaskListPage', () => {
         const filter = (params.filter ?? 'processing') as 'all' | keyof typeof FIXED_TOTALS
         const total = filter === 'all' ? 37 : FIXED_TOTALS[filter]
         const page = params.page ?? 1
-        const pageSize = params.page_size ?? 15
+        const pageSize = params.page_size ?? 10
         const start = (page - 1) * pageSize
         // 列表页 (activeFilter=processing) 切出 processing items;
         // 其它 filter / filterTotal 任意 data 都行, 反正只用 meta.total.
@@ -1440,7 +1523,7 @@ describe('TaskListPage', () => {
   }, 12000)
 
   it('filter total errors do not silently show 0 — show — when no stale data', async () => {
-    // 关键守卫: 主列表 (activeFilter=currentPage=PAGE_SIZE) 成功, 4 个
+    // 关键守卫: 主列表 (activeFilter/currentPage/default page size) 成功, 4 个
     // filter total queries 失败, 4 个 StatCard 必须显示 "—", 而不是
     // 把 0 误读成"该 filter 没任何 flow". 旧版测试让主列表也失败,
     // 整个页面进入 ErrorState, StatCard 不渲染, 实际没覆盖这条边界.
@@ -1448,7 +1531,7 @@ describe('TaskListPage', () => {
     const erroringService: TaskListService = {
       async listFlows(params: { filter?: string; page?: number; page_size?: number } = {}) {
         // 判定调用类型: page_size=1 + page=1 是 filter total query,
-        // 其它 (page=PAGE_SIZE) 是主列表. 主列表成功, filter total
+        // 其它调用是主列表. 主列表成功, filter total
         // 全部 throw.
         const isFilterTotal = params.page_size === 1 && params.page === 1
         if (isFilterTotal) {
@@ -1485,7 +1568,7 @@ describe('TaskListPage', () => {
           status: 'success' as const,
           data: { items },
           messages: [],
-          meta: { page: 1, page_size: 15, total: 5, filters: { filter: 'all' } },
+          meta: { page: 1, page_size: 10, total: 5, filters: { filter: 'all' } },
         }
       },
       async tick() {
@@ -1553,7 +1636,7 @@ describe('TaskListPage', () => {
           status: 'success' as const,
           data: { items: [] },
           messages: [],
-          meta: { page: 1, page_size: 15, total: 0, filters: { filter: 'all' } },
+          meta: { page: 1, page_size: 10, total: 0, filters: { filter: 'all' } },
         }
       },
       async tick() {

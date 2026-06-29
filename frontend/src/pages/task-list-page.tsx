@@ -32,9 +32,10 @@ const IS_MOCK = import.meta.env.VITE_API_MODE === 'mock'
 const defaultTaskService = createTaskService()
 export type TaskListService = Pick<TaskService, 'listFlows' | 'tick' | 'retryDownloadSync' | 'deleteDownload' | 'deleteTask' | 'pauseDownload' | 'resumeDownload'>
 
-// 任务列表固定每页条数, 翻页状态由 React state 维护并透传给
-// /flows 后端. 任何"假装本地分页是全局分页"的写法都禁止出现.
-const PAGE_SIZE = 15
+// 任务列表分页状态由 React state 维护并透传给 /flows 后端.
+// 任何"假装本地分页是全局分页"的写法都禁止出现.
+const DEFAULT_PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 const filterKeys: Array<{ value: FlowFilter; key: string }> = [
   { value: 'all', key: 'taskList.filter_all' },
@@ -419,6 +420,7 @@ export function TaskListPage({
   const [searchParams, setSearchParams] = useSearchParams()
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const urlFilter = searchParams.get('filter')
   const activeFilter: FlowFilter = (urlFilter && filterKeys.some(o => o.value === urlFilter))
     ? urlFilter as FlowFilter
@@ -435,11 +437,11 @@ export function TaskListPage({
   }
 
   const flowsQuery = useQuery({
-    queryKey: ['flows', activeFilter, currentPage],
+    queryKey: ['flows', activeFilter, currentPage, pageSize],
     queryFn: () => service.listFlows({
       filter: activeFilter,
       page: currentPage,
-      page_size: PAGE_SIZE,
+      page_size: pageSize,
     }),
   })
 
@@ -527,6 +529,7 @@ export function TaskListPage({
   const allItems = useMemo((): FlowSummary[] => flowsQuery.data?.data.items ?? [], [flowsQuery.data])
   // 页面 total 走 /flows meta.total, 不得用 items.length.
   const totalCount = flowsQuery.data?.meta.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   // 自动轮询: ingest flow 走 mock tick 推进状态; download-only flow
   // 没有任何客户端副作用, 但必须触发列表 + 4 个 filter total 一起刷新.
@@ -679,12 +682,29 @@ export function TaskListPage({
 
       {/* 翻页控件 (外层维护, 透传给 /flows). 关闭 DataTable 内部分页,
           避免在已由后端切过的 data 上再做一次本地切. */}
-      {totalCount > PAGE_SIZE && (
+      {totalCount > 0 && (
         <div className="flex flex-col gap-3 mt-4 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm text-muted-foreground">
-            {t('taskList.page')} {currentPage} / {Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
+            {t('taskList.page')} {currentPage} / {totalPages}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>{t('taskList.pageSize')}</span>
+              <select
+                className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                value={pageSize}
+                onChange={(event) => {
+                  setPageSize(Number(event.target.value))
+                  setCurrentPage(1)
+                }}
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {t('taskList.pageSizeOption', { count: size })}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button
               variant="secondary"
               size="sm"
@@ -697,7 +717,7 @@ export function TaskListPage({
               variant="secondary"
               size="sm"
               onClick={() => setCurrentPage((p) => p + 1)}
-              disabled={currentPage >= Math.ceil(totalCount / PAGE_SIZE)}
+              disabled={currentPage >= totalPages}
             >
               {t('taskList.next')}
             </Button>
