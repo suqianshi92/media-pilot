@@ -376,6 +376,7 @@ def test_manual_select_blocked_with_no_existing_run_creates_system_run_and_decis
         assert decision is not None
         assert decision.decision_type == "manual_selection_blocked"
         assert decision.status == "pending"
+        assert decision.free_text_allowed is False
 
         # system run 应被自动创建并切到 waiting_user, current_step=manual_selection_blocked
         run = session.get(AgentRun, decision.run_id)
@@ -477,6 +478,7 @@ def test_manual_select_blocked_with_existing_run_attaches_decision(
     with session_factory() as session:
         decision = session.get(AgentDecisionRequest, result.decision_id)
         assert decision is not None
+        assert decision.free_text_allowed is False
         # decision 必须挂在已有 run 上, 不应新建 run
         assert decision.run_id == existing_run_id
         # 且不应该再额外创建其他 run

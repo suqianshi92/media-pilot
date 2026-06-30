@@ -749,7 +749,7 @@ def _create_blocked_decision(
         task_id=task_id,
         decision_type="manual_selection_blocked",
         question=f"候选已选择但因以下原因无法自动发布：{reason_text}。请选择处理方式：",
-        free_text_allowed=True,
+        free_text_allowed=False,
         options=[
             {
                 "id": "retry",
