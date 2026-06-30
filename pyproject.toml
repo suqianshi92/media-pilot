@@ -5,6 +5,7 @@ description = "Single-node AI media automation MVP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "anyio==4.9.0",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "openai>=1.0.0",
