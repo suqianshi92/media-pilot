@@ -172,6 +172,52 @@ def test_prepare_republish_source_uses_published_file_when_original_source_missi
         ).first() is None
 
 
+def test_prepare_republish_source_preserves_operation_records_when_deleting_assets(
+    tmp_path: Path,
+) -> None:
+    """旧发布资产可被清理, 但审计记录必须保留且不再引用已删除资产。"""
+    from sqlalchemy import select
+
+    from media_pilot.services.republish_source import prepare_republish_source
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+    task_id = _create_published_file_task(session_factory, config=config)
+
+    with session_factory() as session:
+        asset = session.scalars(
+            select(FileAsset).where(FileAsset.task_id == task_id)
+        ).first()
+        assert asset is not None
+        session.add(OperationRecord(
+            task_id=task_id,
+            file_asset_id=asset.id,
+            operation_type="copy_to_staging",
+            permission_level="write",
+            target_path=asset.path,
+            status="succeeded",
+            details={},
+        ))
+        session.commit()
+
+    with session_factory() as session:
+        result = prepare_republish_source(session=session, config=config, task_id=task_id)
+        session.commit()
+
+    assert result.ok, result.summary
+    with session_factory() as session:
+        assert session.scalars(
+            select(FileAsset).where(FileAsset.task_id == task_id)
+        ).first() is None
+        op = session.scalars(
+            select(OperationRecord)
+            .where(OperationRecord.task_id == task_id)
+            .where(OperationRecord.operation_type == "copy_to_staging")
+        ).one()
+        assert op.file_asset_id is None
+
+
 def test_prepare_republish_source_uses_published_bdmv_when_original_source_missing(
     tmp_path: Path,
 ) -> None:

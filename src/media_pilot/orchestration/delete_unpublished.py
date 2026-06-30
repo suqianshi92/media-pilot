@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from media_pilot.config.settings import AppConfig
@@ -379,6 +379,12 @@ def _cascade_delete_task_business_data(session: Session, task_id: str) -> None:
     用于 delete_task_input 路径：任务标记为终态，不留业务残留，
     但事件时间线和审计记录完整保留。
     """
+    session.execute(
+        update(OperationRecord)
+        .where(OperationRecord.task_id == task_id)
+        .where(OperationRecord.file_asset_id.is_not(None))
+        .values(file_asset_id=None)
+    )
     tables_in_order = [
         (AdapterCall, AdapterCall.task_id),
         (FileAsset, FileAsset.task_id),

@@ -4,7 +4,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from media_pilot.repository.models import (
@@ -258,7 +258,15 @@ def _cleanup_publish_context(session: Session, task_id: str) -> None:
     撤销发布后必须清除旧 WriteResult/WritePlan/FileAsset，
     否则后续发布判断会依赖已撤回的过期数据。
     MetadataDetail 保留以供 reingest_with_existing_metadata 使用。
+    OperationRecord 作为审计时间线保留，但它可能引用 FileAsset；
+    删除 FileAsset 前先断开引用，避免 Postgres 外键阻塞。
     """
+    session.execute(
+        update(OperationRecord)
+        .where(OperationRecord.task_id == task_id)
+        .where(OperationRecord.file_asset_id.is_not(None))
+        .values(file_asset_id=None)
+    )
     tables_in_order = [
         (WriteResult, WriteResult.task_id),
         (WritePlan, WritePlan.task_id),

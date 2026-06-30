@@ -14,6 +14,7 @@ from media_pilot.repository.models import (
     MediaCandidate,
     MediaSourceSelection,
     MetadataDetail,
+    OperationRecord,
     WritePlan,
     WriteResult,
 )
@@ -1194,8 +1195,6 @@ def test_post_revoke_reply_invalid_option_400(tmp_path: Path):
 def test_delete_input_preserves_audit_record(tmp_path: Path):
     """删除任务输入后保留 OperationRecord 和 IngestTask 主记录。"""
     from media_pilot.orchestration.delete_unpublished import execute_delete_input
-    from media_pilot.repository.models import OperationRecord
-
     downloads = tmp_path / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     config = AppConfig(
@@ -1225,6 +1224,23 @@ def test_delete_input_preserves_audit_record(tmp_path: Path):
             input_path=str(source_file),
             selected_path=str(source_file),
         ))
+        asset = FileAsset(
+            task_id=task.id,
+            role="library_video",
+            path=str(source_file),
+            size_bytes=source_file.stat().st_size,
+        )
+        session.add(asset)
+        session.flush()
+        session.add(OperationRecord(
+            task_id=task.id,
+            file_asset_id=asset.id,
+            operation_type="copy_to_staging",
+            permission_level="write",
+            target_path=str(source_file),
+            status="succeeded",
+            details={},
+        ))
         session.commit()
         task_id = task.id
 
@@ -1249,6 +1265,11 @@ def test_delete_input_preserves_audit_record(tmp_path: Path):
         ).all()
         assert len(ops) >= 1
         assert any(o.operation_type == "delete_task_input" for o in ops)
+        copy_op = next(o for o in ops if o.operation_type == "copy_to_staging")
+        assert copy_op.file_asset_id is None
+        assert session.scalars(
+            select(FileAsset).where(FileAsset.task_id == task_id)
+        ).first() is None
 
 
 # ── _quick_publish 状态检查测试 ──
