@@ -395,6 +395,7 @@
     "publishWithoutMetadata": "Publish Without Metadata",
     "noMetadataPublishing": "Publishing...",
     "noMetadataPublishHint": "If metadata cannot be found, publish only the confirmed media content now. You can search metadata and republish later.",
+    "noMetadataPublishConfirmTitle": "Confirm No-Metadata Import",
     "noMetadataPublishConfirm": "Publish without metadata? Media Pilot will not generate NFO or images, only the confirmed media content.",
     "noMetadataPublishSubmitted": "No-metadata publish submitted.",
     "noMetadataPublishSubmittedDesc": "Publishing the confirmed media content.",

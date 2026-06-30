@@ -28,6 +28,7 @@ import { MetadataCandidateCard, type MetadataCardCandidate } from '@/components/
 import { AgentPanel } from '@/components/agent/agent-panel'
 import { createTaskService, type TaskService } from '@/services/task-service'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import type { MediaSourceSelectionDto, MetadataCandidateDto, ResearchResponseData, ResearchScope, TaskDetailDto } from '@/types/task'
 import i18n from '@/i18n'
@@ -218,6 +219,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const [searchSummary, setSearchSummary] = useState<ResearchResponseData['search_summary'] | null>(null)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ title: string; description: string; variant: 'success' | 'warning' | 'error' } | null>(null)
+  const [showNoMetadataConfirm, setShowNoMetadataConfirm] = useState(false)
 
   useEffect(() => {
     setKeyword(detail.search_keyword?.keyword ?? '')
@@ -226,6 +228,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
     setSearchSummary(null)
     setSearchError(null)
     setFeedback(null)
+    setShowNoMetadataConfirm(false)
   }, [detail.task.id, detail.search_keyword?.keyword])
 
   const handleScopeLabel = (value: ResearchScope): string => {
@@ -276,6 +279,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       })
     },
     onSuccess: async (result) => {
+      setShowNoMetadataConfirm(false)
       const status = result.data.status
       const summary = result.data.summary
       if (status === 'waiting_user') {
@@ -331,6 +335,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       })
     },
     onSuccess: async (result) => {
+      setShowNoMetadataConfirm(false)
       const status = result.data.status
       setFeedback({
         variant: status === 'waiting_user' ? 'warning' : 'success',
@@ -348,6 +353,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       await taskDetailPromise
     },
     onError: (err) => {
+      setShowNoMetadataConfirm(false)
       setFeedback({
         variant: 'error',
         title: t('taskWorkspace.noMetadataPublishFailed'),
@@ -369,8 +375,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
 
   const handlePublishWithoutMetadata = () => {
     if (isAgentRunning || publishWithoutMetadataMutation.isPending) return
-    if (!window.confirm(t('taskWorkspace.noMetadataPublishConfirm'))) return
-    publishWithoutMetadataMutation.mutate()
+    setShowNoMetadataConfirm(true)
   }
 
   return (
@@ -440,6 +445,18 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
           {researchMutation.isPending ? t('taskWorkspace.researching') : t('taskWorkspace.researchButton')}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={showNoMetadataConfirm}
+        title={t('taskWorkspace.noMetadataPublishConfirmTitle')}
+        description={t('taskWorkspace.noMetadataPublishConfirm')}
+        confirmLabel={t('taskWorkspace.publishWithoutMetadata')}
+        loading={publishWithoutMetadataMutation.isPending}
+        onConfirm={() => publishWithoutMetadataMutation.mutate()}
+        onCancel={() => {
+          if (!publishWithoutMetadataMutation.isPending) setShowNoMetadataConfirm(false)
+        }}
+      />
 
       <p className="text-xs text-muted-foreground">
         {t('taskWorkspace.searchScope')}：{handleScopeLabel(scope)}
