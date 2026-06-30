@@ -212,6 +212,8 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const queryClient = useQueryClient()
   const taskId = detail.task.id
   const isAgentRunning = detail.task.status_summary.status === 'agent_running'
+  const isNoMetadataPublished = detail.task.metadata_status === 'none'
+  const canPublishWithoutMetadata = !isAgentRunning && !detail.metadata_detail && !isNoMetadataPublished
 
   const [keyword, setKeyword] = useState(detail.search_keyword?.keyword ?? '')
   const [scope, setScope] = useState<ResearchScope>('all')
@@ -393,7 +395,15 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
         />
       ) : null}
 
-      {!isAgentRunning && !detail.metadata_detail ? (
+      {isNoMetadataPublished ? (
+        <InlineMessage
+          variant="warning"
+          title={t('taskWorkspace.noMetadataPublishDone')}
+          description={t('taskWorkspace.noMetadataPublishedHint')}
+        />
+      ) : null}
+
+      {canPublishWithoutMetadata ? (
         <div className="flex flex-col gap-2 rounded-md border border-amber-200/70 bg-amber-50/70 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30 md:flex-row md:items-center md:justify-between">
           <p className="text-muted-foreground">{t('taskWorkspace.noMetadataPublishHint')}</p>
           <Button
