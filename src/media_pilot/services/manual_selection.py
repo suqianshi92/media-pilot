@@ -430,12 +430,6 @@ def _revoke_completed_publish_for_manual_reselect(
             summary=f"撤销旧发布失败，无法重新入库：{check.outcome_description}",
         )
 
-    if check.is_complex_structure:
-        return ManualSelectResult(
-            status="agent_failed",
-            summary="已发布的 BDMV / 复杂结构暂不支持通过手动重选元数据重新入库",
-        )
-
     if not check.source_file_exists:
         prepared = _prepare_published_output_reselect_source(
             session=session,
@@ -445,6 +439,13 @@ def _revoke_completed_publish_for_manual_reselect(
         )
         if prepared is not None:
             return prepared
+
+    if check.is_complex_structure:
+        return _cleanup_completed_publish_for_manual_reselect(
+            session=session,
+            task_id=task_id,
+            publish_dir=check.publish_dir,
+        )
 
     try:
         result = execute_revoke_publish(
@@ -463,6 +464,34 @@ def _revoke_completed_publish_for_manual_reselect(
             status="agent_failed",
             summary="旧发布已撤销，但源文件缺失或结构不支持，无法重新入库",
         )
+    return None
+
+
+def _cleanup_completed_publish_for_manual_reselect(
+    *,
+    session: Session,
+    task_id: str,
+    publish_dir: str | None,
+) -> ManualSelectResult | None:
+    """手动重选元数据专用撤销: 删除发布产物, 保留任务本体继续重入库。"""
+    from media_pilot.orchestration.revoke_publish import _cleanup_publish_context
+    from media_pilot.orchestration.state_machine import IngestTaskStatus
+    from media_pilot.repository.models import IngestTask
+
+    if publish_dir:
+        publish_path = Path(publish_dir)
+        if publish_path.exists():
+            if publish_path.is_dir():
+                shutil.rmtree(publish_path)
+            else:
+                publish_path.unlink()
+
+    _cleanup_publish_context(session, task_id)
+    task = session.get(IngestTask, task_id)
+    if task is not None:
+        task.status = IngestTaskStatus.PROCESSING
+        task.current_step = "post_revoke_reingest"
+    session.flush()
     return None
 
 
@@ -499,6 +528,15 @@ def _prepare_published_output_reselect_source(
         return ManualSelectResult(
             status="agent_failed",
             summary=f"旧发布目录不在受控媒体库根目录内，拒绝重新入库：{publish_path}",
+        )
+
+    from media_pilot.services.disc_input import resolve_bdmv_movie_source
+
+    if resolve_bdmv_movie_source(publish_path) is not None:
+        return _prepare_bdmv_reselect_source(
+            session=session,
+            task_id=task_id,
+            publish_path=publish_path,
         )
 
     source_file = session.scalars(
@@ -540,6 +578,58 @@ def _prepare_published_output_reselect_source(
             "selection_source": "published_output_reselect",
             "source_kind": "file",
             "temporary": True,
+            "original_publish_dir": str(publish_path),
+            "original_source_path_missing": True,
+        },
+    )
+    session.flush()
+    return None
+
+
+def _prepare_bdmv_reselect_source(
+    *,
+    session: Session,
+    task_id: str,
+    publish_path: Path,
+) -> ManualSelectResult | None:
+    from media_pilot.repository.models import IngestTask
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
+    from media_pilot.services.disc_input import resolve_bdmv_movie_source
+
+    bdmv_source = resolve_bdmv_movie_source(publish_path)
+    if bdmv_source is None:
+        return None
+
+    staging_dir = publish_path.parent / ".media-pilot-staging" / task_id / "republish-source"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(bdmv_source.bdmv_dir, staging_dir / "BDMV", dirs_exist_ok=True)
+    if bdmv_source.certificate_dir is not None:
+        shutil.copytree(
+            bdmv_source.certificate_dir,
+            staging_dir / "CERTIFICATE",
+            dirs_exist_ok=True,
+        )
+
+    task = session.get(IngestTask, task_id)
+    if task is not None:
+        task.source_path = str(staging_dir)
+    MediaSourceSelectionRepository(session).save(
+        task_id=task_id,
+        input_path=str(staging_dir),
+        selected_path=None,
+        confidence=1.0,
+        reason="published_output_reselect",
+        payload={
+            "selection_source": "published_output_reselect",
+            "source_kind": "bdmv",
+            "temporary": True,
+            "bdmv_dir": str(staging_dir / "BDMV"),
+            "certificate_dir": (
+                str(staging_dir / "CERTIFICATE")
+                if (staging_dir / "CERTIFICATE").is_dir() else None
+            ),
             "original_publish_dir": str(publish_path),
             "original_source_path_missing": True,
         },

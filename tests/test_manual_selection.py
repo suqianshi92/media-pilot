@@ -103,6 +103,27 @@ def _seed_metadata_detail(
         session.commit()
 
 
+def _stub_ok_eligibility_and_images(monkeypatch, auto_ingest) -> None:
+    class _OkEligibility:
+        eligible = True
+        media_type = "movie"
+        candidate_count = 1
+        confidence_threshold = 0.8
+        margin = 0.0
+        blocking_reasons: list[str] = []
+        warnings: list[str] = []
+
+    monkeypatch.setattr(
+        auto_ingest,
+        "check_eligibility",
+        lambda *, session, config, task_id: _OkEligibility(),
+    )
+    monkeypatch.setattr(
+        "media_pilot.orchestration.jellyfin_movie_writer._download_image",
+        lambda client, url, path: b"poster",
+    )
+
+
 # ── fixtures for stubbing detail-fetch eligibility ───────────────────────
 
 
@@ -1172,6 +1193,172 @@ def test_manual_select_completed_task_with_missing_source_republishes_from_libra
             select(FileAsset).where(FileAsset.task_id == task_id)
         ).all()
         assert any(asset.role == "library_video" for asset in assets)
+
+
+def test_manual_select_completed_bdmv_task_revokes_without_deleting_task(
+    tmp_path: Path, monkeypatch, stub_dependencies,
+) -> None:
+    """已发布 BDMV 电影手动改元数据时, 应保留任务并复用原 BDMV 源重发。"""
+    from media_pilot.repository.models import MediaSourceSelection, WritePlan, WriteResult
+    from media_pilot.services import auto_ingest
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    source_dir = config.downloads_dir / "Old BDMV"
+    (source_dir / "BDMV").mkdir(parents=True)
+    (source_dir / "BDMV" / "index.bdmv").write_text("index")
+    (source_dir / "BDMV" / "STREAM").mkdir()
+    (source_dir / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"movie")
+
+    old_publish_dir = config.movies_dir / "Wrong Movie (2024)"
+    (old_publish_dir / "BDMV").mkdir(parents=True)
+    (old_publish_dir / "BDMV" / "index.bdmv").write_text("old")
+
+    task_id = _make_task(
+        session_factory,
+        source_path=str(source_dir),
+        status="library_import_complete",
+    )
+    with session_factory() as session:
+        session.add(MediaSourceSelection(
+            task_id=task_id,
+            input_path=str(source_dir),
+            selected_path=None,
+            confidence=1.0,
+            reason="auto_bdmv_movie_dir",
+            payload={"source_kind": "bdmv", "bdmv_dir": str(source_dir / "BDMV")},
+        ))
+        session.add(WritePlan(
+            task_id=task_id,
+            target_dir=str(old_publish_dir),
+            target_file=str(old_publish_dir / "BDMV" / "index.bdmv"),
+            nfo_path=str(old_publish_dir / "BDMV" / "index.nfo"),
+            payload={"source_kind": "bdmv"},
+        ))
+        session.add(WriteResult(
+            task_id=task_id,
+            status="succeeded",
+            payload={"target_dir": str(old_publish_dir), "source_kind": "bdmv"},
+        ))
+        session.commit()
+
+    _stub_ok_eligibility_and_images(monkeypatch, auto_ingest)
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:456",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published", result.summary
+    assert not old_publish_dir.exists()
+    assert (config.movies_dir / "Test Movie (2026)" / "BDMV" / "index.bdmv").exists()
+
+    with session_factory() as session:
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.status == "library_import_complete"
+        assert task.source_path == str(source_dir)
+
+
+def test_manual_select_completed_bdmv_task_with_missing_source_republishes_from_library_output(
+    tmp_path: Path, monkeypatch, stub_dependencies,
+) -> None:
+    """原 BDMV 源已清理时, 手动改元数据应从已发布 BDMV 临时复制后重发。"""
+    from media_pilot.repository.models import (
+        FileAsset,
+        MediaSourceSelection,
+        WritePlan,
+        WriteResult,
+    )
+    from media_pilot.services import auto_ingest
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    missing_source = config.downloads_dir / "Missing BDMV"
+    old_publish_dir = config.movies_dir / "Wrong Movie (2024)"
+    (old_publish_dir / "BDMV").mkdir(parents=True)
+    (old_publish_dir / "BDMV" / "index.bdmv").write_text("old")
+    (old_publish_dir / "BDMV" / "STREAM").mkdir()
+    (old_publish_dir / "BDMV" / "STREAM" / "00001.m2ts").write_bytes(b"movie")
+    (old_publish_dir / "CERTIFICATE").mkdir()
+    (old_publish_dir / "CERTIFICATE" / "id.bdmv").write_text("cert")
+
+    task_id = _make_task(
+        session_factory,
+        source_path=str(missing_source),
+        status="library_import_complete",
+    )
+    with session_factory() as session:
+        session.add(MediaSourceSelection(
+            task_id=task_id,
+            input_path=str(missing_source),
+            selected_path=None,
+            confidence=1.0,
+            reason="source_was_cleaned",
+            payload={"source_kind": "bdmv", "bdmv_dir": str(missing_source / "BDMV")},
+        ))
+        session.add(WritePlan(
+            task_id=task_id,
+            target_dir=str(old_publish_dir),
+            target_file=str(old_publish_dir / "BDMV" / "index.bdmv"),
+            nfo_path=str(old_publish_dir / "BDMV" / "index.nfo"),
+            payload={"source_kind": "bdmv"},
+        ))
+        session.add(WriteResult(
+            task_id=task_id,
+            status="succeeded",
+            payload={"target_dir": str(old_publish_dir), "source_kind": "bdmv"},
+        ))
+        session.add(FileAsset(
+            task_id=task_id,
+            role="library_bdmv",
+            path=str(old_publish_dir / "BDMV"),
+            size_bytes=None,
+        ))
+        session.commit()
+
+    _stub_ok_eligibility_and_images(monkeypatch, auto_ingest)
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:456",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published", result.summary
+    assert not old_publish_dir.exists()
+    assert (config.movies_dir / "Test Movie (2026)" / "BDMV" / "index.bdmv").exists()
+    assert (config.movies_dir / "Test Movie (2026)" / "CERTIFICATE" / "id.bdmv").exists()
+    assert not (
+        config.movies_dir / ".media-pilot-staging" / task_id / "republish-source"
+    ).exists()
+
+    with session_factory() as session:
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.status == "library_import_complete"
+        assert task.source_path.endswith("/republish-source")
 
 
 def test_manual_select_publish_success_applies_trash_cleanup_policy(
