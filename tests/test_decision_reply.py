@@ -131,6 +131,61 @@ def _make_decision(
     return dr
 
 
+def test_metadata_unavailable_publish_without_metadata_publishes_deterministically(
+    tmp_path: Path,
+) -> None:
+    from media_pilot.repository.database import create_session_factory, initialize_database
+    from media_pilot.repository.repositories import IngestTaskRepository
+    from media_pilot.services.decision_reply import ReplyInput, reply_to_decision
+
+    config = _make_config(tmp_path)
+    config.watch_dir.mkdir(parents=True)
+    source = config.watch_dir / "No.Metadata.Movie.mkv"
+    source.write_bytes(b"video")
+    initialize_database(config)
+    sf = create_session_factory(config)
+
+    with sf() as session:
+        task = _make_task(
+            session,
+            source_path=str(source),
+            media_type="movie",
+            status="waiting_user",
+        )
+        run = _make_run(
+            session,
+            task.id,
+            status="waiting_user",
+            current_step="metadata_unavailable_action",
+        )
+        decision = _make_decision(
+            session,
+            run_id=run.id,
+            task_id=task.id,
+            decision_type="metadata_unavailable_action",
+            question="未找到元数据，请选择处理方式。",
+            options=[
+                {"id": "continue_search", "label": "继续搜索"},
+                {"id": "publish_without_metadata", "label": "无元数据入库"},
+                {"id": "cancel", "label": "取消"},
+            ],
+        )
+
+        result = reply_to_decision(
+            session=session,
+            config=config,
+            reply=ReplyInput(decision_id=decision.id, option_id="publish_without_metadata"),
+        )
+        session.commit()
+
+        assert result.status == "no_metadata_published"
+        task_after = IngestTaskRepository(session).get(task.id)
+        assert task_after is not None
+        assert task_after.status == "library_import_complete"
+        assert task_after.metadata_status == "none"
+        assert (config.movies_dir / "No.Metadata.Movie" / "No.Metadata.Movie.mkv").exists()
+
+
 # ── 工具桩: 把 `registry.execute` / `fetch_and_save_metadata_detail`
 #    替换成 deterministic stubs. 测试只关心"调用顺序 + 状态机", 不
 #    关心工具内部细节. ──

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from media_pilot.config import AppConfig
@@ -97,8 +97,7 @@ def initialize_database(config: AppConfig) -> Path | str:
     Base.metadata.create_all(engine)
 
     with engine.connect() as conn:
-        if is_sqlite_engine(engine):
-            _ensure_sqlite_legacy_columns(conn)
+        _ensure_lightweight_columns(conn)
         _ensure_active_agent_run_index(conn)
         conn.commit()
 
@@ -106,9 +105,9 @@ def initialize_database(config: AppConfig) -> Path | str:
     return database_path
 
 
-def _ensure_sqlite_legacy_columns(conn) -> None:
-    # 简单迁移：为已有 SQLite 数据库补充缺失列。PostgreSQL 不走这条路,
-    # 生产迁移应通过独立迁移脚本处理旧数据。
+def _ensure_lightweight_columns(conn) -> None:
+    # 简单迁移：为已有数据库补充缺失列。项目未引入 Alembic，这里只做
+    # 向后兼容的 ADD COLUMN，不处理复杂数据迁移。
     _ensure_column(conn, "ingest_tasks", "source_download_task_id", "TEXT")
     _ensure_column(conn, "download_tasks", "ingest_task_id", "TEXT")
     _ensure_column(conn, "app_settings", "preferred_metadata_language", "TEXT")
@@ -123,6 +122,10 @@ def _ensure_sqlite_legacy_columns(conn) -> None:
     )
     _ensure_column(conn, "ingest_tasks", "title", "TEXT")
     _ensure_column(conn, "ingest_tasks", "year", "INTEGER")
+    _ensure_column(
+        conn, "ingest_tasks", "metadata_status",
+        "VARCHAR(32) NOT NULL DEFAULT 'unknown'",
+    )
     # DownloadTask → IngestTask 派发链上传透 preselected 元数据事实.
     # Agent 链路必须把它视为强事实, 不得向用户确认同一个元数据.
     _ensure_column(conn, "ingest_tasks", "preselected_metadata_profile", "TEXT")
@@ -145,7 +148,7 @@ def _ensure_active_agent_run_index(conn) -> None:
 
 def _ensure_column(conn, table: str, column: str, col_type: str) -> None:
     """如果表中不存在指定列，则 ALTER TABLE ADD COLUMN。"""
-    cols = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+    cols = {col["name"] for col in inspect(conn).get_columns(table)}
     if column not in cols:
         conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
 

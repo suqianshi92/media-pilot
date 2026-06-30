@@ -334,6 +334,7 @@ def _quick_publish(
     task_repo.update_status(
         task, status="library_import_complete", current_step="library_import_complete",
     )
+    task.metadata_status = "complete"
     session.flush()
     return _PublishOutcome(
         kind="published",

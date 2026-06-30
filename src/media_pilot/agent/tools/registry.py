@@ -150,6 +150,7 @@ def register_builtin_tools() -> None:
         make_handle_source_cleanup,
         make_persist_metadata_selection,
         make_publish_movie_to_library,
+        make_publish_without_metadata,
         make_revoke_publish,
     )
 
@@ -166,6 +167,7 @@ def register_builtin_tools() -> None:
         make_persist_metadata_selection(),
         make_fetch_and_save_metadata_detail(),
         make_publish_movie_to_library(),
+        make_publish_without_metadata(),
         make_get_auto_ingest_eligibility(),
         make_revoke_publish(),
         make_handle_source_cleanup(),

@@ -551,6 +551,7 @@ def _handle_publish_show_to_library(
         # 7) 任务进入 library_import_complete
         task.status = "library_import_complete"
         task.current_step = "library_import_complete"
+        task.metadata_status = "complete"
         context.session.flush()
         warnings_text = (
             f" ({len(write_result.warnings)} warning(s))"

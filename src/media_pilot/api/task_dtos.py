@@ -106,6 +106,8 @@ class TaskStep(StrEnum):
 
 MediaType = Literal["movie", "show", "unknown"]
 
+MetadataStatus = Literal["unknown", "complete", "none"]
+
 ConfidenceLevel = Literal["high", "medium", "low", "unknown"]
 
 TimelineTone = Literal["default", "success", "warning", "error"]
@@ -220,6 +222,7 @@ class TaskSummary(BaseModel):
     title: str | None = None
     year: int | None = None
     media_type: MediaType | None = None
+    metadata_status: MetadataStatus = "unknown"
     can_confirm: bool = False
     flow_type: Literal["managed_download", "external_import"] = "external_import"
     total_status: str = "discovered"  # 8.3: 下载中 → 等待转入入库 → 入库阶段状态
@@ -263,6 +266,7 @@ class FlowSummary(BaseModel):
     title: str | None = None
     year: int | None = None
     media_type: MediaType | None = None
+    metadata_status: MetadataStatus = "unknown"
     can_confirm: bool = False
     file_format: str | None = None
     source_path: str | None = None

@@ -265,6 +265,23 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
         )
 
     if "no_metadata_candidates" in eligibility.blocking_reasons:
+        decision = _create_metadata_unavailable_decision(
+            context=context,
+            task_id=task_id,
+            reason="no_metadata_candidates",
+            question="没有找到可用元数据。请选择下一步处理方式。",
+        )
+        if decision is not None:
+            return ToolResult(
+                status="success",
+                summary="Metadata unavailable; awaiting user decision.",
+                data={
+                    "decision_requested": True,
+                    "decision_id": decision.id,
+                    "decision_type": "metadata_unavailable_action",
+                    "reason": "no_metadata_candidates",
+                },
+            )
         return ToolResult(
             status="failure",
             summary="No metadata candidates exist for this task. Search for metadata before publishing.",
@@ -272,6 +289,24 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
         )
 
     if "no_clear_metadata_winner" in eligibility.blocking_reasons:
+        decision = _create_metadata_unavailable_decision(
+            context=context,
+            task_id=task_id,
+            reason="no_clear_metadata_winner",
+            question="已有候选不够明确。请选择继续处理方式。",
+        )
+        if decision is not None:
+            return ToolResult(
+                status="success",
+                summary="No clear metadata winner; awaiting user decision.",
+                data={
+                    "decision_requested": True,
+                    "decision_id": decision.id,
+                    "decision_type": "metadata_unavailable_action",
+                    "reason": "no_clear_metadata_winner",
+                    "candidate_count": eligibility.candidate_count,
+                },
+            )
         return ToolResult(
             status="failure",
             summary="No clear metadata winner — candidates have low confidence or are too close to auto-select. Manual metadata selection required.",
@@ -287,6 +322,23 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
     detail_repo = MetadataDetailRepository(context.session)
     orm_detail = detail_repo.get_for_task(task_id)
     if orm_detail is None:
+        decision = _create_metadata_unavailable_decision(
+            context=context,
+            task_id=task_id,
+            reason="no_metadata_detail",
+            question="元数据详情不可用。请选择下一步处理方式。",
+        )
+        if decision is not None:
+            return ToolResult(
+                status="success",
+                summary="Metadata detail unavailable; awaiting user decision.",
+                data={
+                    "decision_requested": True,
+                    "decision_id": decision.id,
+                    "decision_type": "metadata_unavailable_action",
+                    "reason": "no_metadata_detail",
+                },
+            )
         return ToolResult(
             status="failure",
             summary="No metadata detail found; fetch and save detail before publishing",
@@ -429,6 +481,7 @@ def _handle_publish_movie_to_library(context: ToolContext, input_data: dict) -> 
     if write_result.status in ("succeeded", "warning"):
         task.status = "library_import_complete"
         task.current_step = "library_import_complete"
+        task.metadata_status = "complete"
         context.session.flush()
 
         warnings_text = f" ({len(write_result.warnings)} warning(s))" if write_result.warnings else ""
@@ -534,6 +587,133 @@ def make_publish_movie_to_library() -> ToolDefinition:
         parameters=_PUBLISH_MOVIE_TO_LIBRARY_SCHEMA,
         permission_level=PermissionLevel.WRITE,
         handler=_handle_publish_movie_to_library,
+    )
+
+
+def _create_metadata_unavailable_decision(
+    *,
+    context: ToolContext,
+    task_id: str,
+    reason: str,
+    question: str,
+):
+    if not context.run_id:
+        return None
+    from media_pilot.repository.repositories import (
+        AgentDecisionRequestCreate,
+        AgentDecisionRequestRepository,
+        AgentRunRepository,
+        IngestTaskRepository,
+    )
+
+    dr_repo = AgentDecisionRequestRepository(context.session)
+    try:
+        decision = dr_repo.create(AgentDecisionRequestCreate(
+            run_id=context.run_id,
+            task_id=task_id,
+            decision_type="metadata_unavailable_action",
+            question=question,
+            free_text_allowed=False,
+            options=[
+                {
+                    "id": "continue_search",
+                    "label": "继续搜索",
+                    "description": "让 Agent 继续尝试其它关键词或候选。",
+                },
+                {
+                    "id": "publish_without_metadata",
+                    "label": "无元数据入库",
+                    "description": "只发布已确认的媒体内容，不生成 NFO 或图片。",
+                },
+                {
+                    "id": "cancel",
+                    "label": "取消处理",
+                    "description": "停止本次自动处理，任务进入失败态。",
+                },
+            ],
+            payload={"reason": reason},
+        ))
+    except ValueError:
+        return None
+
+    task = IngestTaskRepository(context.session).get(task_id)
+    if task is not None:
+        IngestTaskRepository(context.session).update_status(
+            task, status="waiting_user", current_step="metadata_unavailable_action",
+        )
+    run = AgentRunRepository(context.session).get(context.run_id)
+    if run is not None:
+        AgentRunRepository(context.session).update_status(
+            run, status="waiting_user", current_step="metadata_unavailable_action",
+        )
+    context.session.flush()
+    return decision
+
+
+# ── publish_without_metadata ─────────────────────────────────────────
+
+_PUBLISH_WITHOUT_METADATA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "task_id": {"type": "string"},
+    },
+    "required": ["task_id"],
+    "additionalProperties": False,
+}
+
+
+def _handle_publish_without_metadata(context: ToolContext, input_data: dict) -> ToolResult:
+    from media_pilot.services.no_metadata_publish import publish_without_metadata
+    from media_pilot.services.post_publish_cleanup import run_post_publish_source_cleanup
+
+    task_id = input_data["task_id"]
+    result = publish_without_metadata(
+        session=context.session, config=context.config, task_id=task_id,
+        allow_agent_running=True,
+    )
+    if result.status != "published":
+        return ToolResult(
+            status="failure",
+            summary=result.summary,
+            data={
+                "status": result.status,
+                "blocking_reasons": result.blocking_reasons,
+                "final_target_dir": result.final_target_dir,
+                "final_target_file": result.final_target_file,
+            },
+        )
+
+    cleanup = run_post_publish_source_cleanup(
+        session=context.session,
+        config=context.config,
+        task_id=task_id,
+        run_id=context.run_id,
+    )
+    return ToolResult(
+        status="success",
+        summary=result.summary,
+        data={
+            "status": result.status,
+            "metadata_status": "none",
+            "final_target_dir": result.final_target_dir,
+            "final_target_file": result.final_target_file,
+            "cleanup_decision_requested": cleanup.decision_requested,
+        },
+    )
+
+
+def make_publish_without_metadata() -> ToolDefinition:
+    return ToolDefinition(
+        name="publish_without_metadata",
+        description=(
+            "Publish a movie task without metadata after explicit user "
+            "confirmation. Supports single-file movie and BDMV movie inputs. "
+            "Copies only the confirmed media content and subtitles; does not "
+            "write NFO or image assets. Does not support shows."
+        ),
+        parameters=_PUBLISH_WITHOUT_METADATA_SCHEMA,
+        permission_level=PermissionLevel.WRITE,
+        handler=_handle_publish_without_metadata,
     )
 
 

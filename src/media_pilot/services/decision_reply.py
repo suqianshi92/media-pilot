@@ -96,10 +96,16 @@ def reply_to_decision(
     # 决策时已把 run.status 切到 waiting_user. 此处不放行.
     is_select_metadata_candidate = decision.decision_type == "select_metadata_candidate"
 
+    # metadata_unavailable_action: 元数据缺失/不明确后的用户确认。
+    # publish_without_metadata / cancel 走确定性后端路径; continue_search
+    # 切回 Agent 续跑。
+    is_metadata_unavailable_action = decision.decision_type == "metadata_unavailable_action"
+
     if (
         not is_post_revoke
         and not is_target_conflict
         and not is_source_cleanup_action
+        and not is_metadata_unavailable_action
         and run.status != "waiting_user"
     ):
         raise ValueError({
@@ -217,6 +223,148 @@ def reply_to_decision(
                 status="target_conflict_cancelled",
                 message_count=1,
                 tool_call_count=0,
+            )
+
+    # ── metadata_unavailable_action: user confirmed no-metadata ingest ──
+    if is_metadata_unavailable_action:
+        task = task_repo.get(decision.task_id)
+        if task is None:
+            raise ValueError({
+                "status_code": 404,
+                "detail": f"Task {decision.task_id} not found",
+            })
+
+        if reply.option_id == "continue_search":
+            run_repo.update_status(run, status="active", current_step="user_replied")
+            task_repo.update_status(
+                task, status="agent_running", current_step="user_replied",
+            )
+            from media_pilot.agent.runner import continue_agent_run
+            return continue_agent_run(
+                session=session,
+                config=config,
+                run_id=decision.run_id,
+                mock_llm_client=mock_llm_client,
+            )
+
+        if reply.option_id == "cancel":
+            task_repo.update_status(
+                task,
+                status="agent_failed",
+                current_step="agent_failed",
+                failure_reason="用户取消无元数据入库",
+            )
+            run_repo.update_status(
+                run,
+                status="failed",
+                current_step="metadata_unavailable_cancelled",
+                error_message="用户取消无元数据入库",
+            )
+            return AgentRunResult(
+                run_id=decision.run_id,
+                status="metadata_unavailable_cancelled",
+                message_count=1,
+                tool_call_count=0,
+            )
+
+        if reply.option_id == "publish_without_metadata":
+            from media_pilot.repository.repositories import (
+                AgentDecisionRequestCreate,
+            )
+            from media_pilot.services.no_metadata_publish import publish_without_metadata
+            from media_pilot.services.post_publish_cleanup import (
+                run_post_publish_source_cleanup,
+            )
+
+            run_repo.update_status(run, status="active", current_step="no_metadata_publish")
+            task_repo.update_status(
+                task, status="agent_running", current_step="no_metadata_publish",
+            )
+            publish_result = publish_without_metadata(
+                session=session, config=config, task_id=decision.task_id,
+                allow_agent_running=True,
+            )
+            if publish_result.status == "published":
+                cleanup = run_post_publish_source_cleanup(
+                    session=session,
+                    config=config,
+                    task_id=decision.task_id,
+                    run_id=decision.run_id,
+                )
+                if not cleanup.decision_requested:
+                    run_repo.update_status(
+                        run, status="completed", current_step="no_metadata_published",
+                    )
+                return AgentRunResult(
+                    run_id=decision.run_id,
+                    status=(
+                        "no_metadata_published_cleanup_pending"
+                        if cleanup.decision_requested else "no_metadata_published"
+                    ),
+                    message_count=1,
+                    tool_call_count=0,
+                )
+
+            if publish_result.status == "target_conflict":
+                dr_repo.create(AgentDecisionRequestCreate(
+                    run_id=decision.run_id,
+                    task_id=decision.task_id,
+                    decision_type="target_conflict",
+                    question=(
+                        f"目标 {publish_result.final_target_dir} 已被占用。"
+                        "请选择处理方式。"
+                    ),
+                    free_text_allowed=False,
+                    options=[
+                        {
+                            "id": "overwrite_target",
+                            "label": "覆盖发布目标",
+                            "description": "覆盖已存在的发布目标。",
+                        },
+                        {
+                            "id": "cancel_publish",
+                            "label": "取消本次发布",
+                            "description": "任务进入失败态，等待后续处理。",
+                        },
+                    ],
+                    payload={
+                        "final_target_dir": publish_result.final_target_dir,
+                        "final_target_file": publish_result.final_target_file,
+                        "conflict": "no_metadata_target_conflict",
+                        "publish_mode": "no_metadata",
+                    },
+                ))
+                task_repo.update_status(
+                    task, status="waiting_user", current_step="target_conflict",
+                )
+                run_repo.update_status(
+                    run, status="waiting_user", current_step="target_conflict",
+                )
+                return AgentRunResult(
+                    run_id=decision.run_id,
+                    status="target_conflict_pending",
+                    message_count=1,
+                    tool_call_count=0,
+                )
+
+            task_repo.update_status(
+                task,
+                status="agent_failed",
+                current_step="agent_failed",
+                failure_reason=publish_result.summary,
+            )
+            run_repo.update_status(
+                run,
+                status="failed",
+                current_step="no_metadata_publish_failed",
+                error_message=publish_result.summary,
+            )
+            return AgentRunResult(
+                run_id=decision.run_id,
+                status="no_metadata_publish_failed",
+                message_count=1,
+                tool_call_count=0,
+                error_message=publish_result.summary,
             )
 
     # ── manual_selection_blocked: cancel 是确定性取消; retry / free_text
@@ -600,6 +748,14 @@ def _summarize(decision_type: str, option_id: str | None, label: str) -> str:
         if option_id == "delete_input":
             return "[SystemAction] 已请求删除任务输入预检"
         return "[SystemAction] 已选择源文件清理方式"
+    if decision_type == "metadata_unavailable_action":
+        if option_id == "continue_search":
+            return "[SystemAction] 已选择继续搜索元数据"
+        if option_id == "publish_without_metadata":
+            return "[SystemAction] 已确认按无元数据方式入库"
+        if option_id == "cancel":
+            return "[SystemAction] 已取消无元数据入库"
+        return "[SystemAction] 已选择元数据不可用时的处理方式"
     if decision_type == "post_revoke_action":
         if option_id == "reingest_with_new_search":
             return "[SystemAction] 已选择重新搜索并入库"

@@ -209,7 +209,7 @@ class TestToolRegistry:
             names1 = {t.name for t in r.list_tools()}
             assert "get_task_context" in names1
             assert "draft_publish_plan" in names1
-            assert len(names1) == 18  # 6 RO + 2 draft + 2 decision + 5 WRITE + 1 complex_input + 2 show (含 handle_source_cleanup)
+            assert len(names1) == 19  # 6 RO + 2 draft + 2 decision + 6 WRITE + 1 complex_input + 2 show
 
             # Second call is idempotent
             register_builtin_tools()

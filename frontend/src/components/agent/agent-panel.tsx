@@ -149,6 +149,7 @@ const toolLabelKeyMap: Record<string, string> = {
   fetch_and_save_metadata_detail: 'agent.toolLabels.fetchAndSaveMetadataDetail',
   publish_movie_to_library: 'agent.toolLabels.publishMovieToLibrary',
   publish_show_to_library: 'agent.toolLabels.publishShowToLibrary',
+  publish_without_metadata: 'agent.toolLabels.publishWithoutMetadata',
   draft_metadata_replacement: 'agent.toolLabels.draftMetadataReplacement',
   draft_publish_plan: 'agent.toolLabels.draftPublishPlan',
   handle_source_cleanup: 'agent.toolLabels.handleSourceCleanup',
@@ -265,6 +266,8 @@ export function summarizeToolOutput(toolName: string, output: unknown, input: un
       return t('agent.toolSummary.publishMovieToLibrary')
     case 'publish_show_to_library':
       return t('agent.toolSummary.publishShowToLibrary')
+    case 'publish_without_metadata':
+      return t('agent.toolSummary.publishWithoutMetadata')
     case 'draft_metadata_replacement':
       return t('agent.toolSummary.draftMetadataReplacement')
     case 'draft_publish_plan':

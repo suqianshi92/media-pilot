@@ -27,7 +27,7 @@ import { createSettingsService } from '@/services/settings-service'
 export type TaskFilter = TaskSummary['status_summary']['status'] | 'all'
 
 // /api/v1/flows 的 filter 参数与后端 VALID_FILTERS 保持一致.
-export type FlowFilter = 'all' | 'waiting_user' | 'processing' | 'library_import_complete' | 'failed'
+export type FlowFilter = 'all' | 'waiting_user' | 'processing' | 'library_import_complete' | 'failed' | 'no_metadata'
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -350,6 +350,24 @@ export function createApiTaskService() {
       media_type?: string
     }): Promise<ApiEnvelope<ManualSelectResponse>> {
       return apiPost<ApiEnvelope<ManualSelectResponse>>(`/tasks/${taskId}/manual-select`, params)
+    },
+
+    async publishWithoutMetadata(taskId: string): Promise<ApiEnvelope<{
+      status: string
+      metadata_status: 'unknown' | 'complete' | 'none'
+      final_target_dir?: string | null
+      final_target_file?: string | null
+      cleanup_decision_requested?: boolean
+      decision_id?: string | null
+    }>> {
+      return apiPost<ApiEnvelope<{
+        status: string
+        metadata_status: 'unknown' | 'complete' | 'none'
+        final_target_dir?: string | null
+        final_target_file?: string | null
+        cleanup_decision_requested?: boolean
+        decision_id?: string | null
+      }>>(`/tasks/${taskId}/publish-without-metadata`, { confirmed: true })
     },
 
     // ── 删除任务输入 ──

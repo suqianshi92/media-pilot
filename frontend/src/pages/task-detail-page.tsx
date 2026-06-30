@@ -37,6 +37,7 @@ export type TaskDetailService = Pick<
   TaskService,
   'getTaskDetail' | 'getRevokePublishCheck' | 'executeRevokePublish' | 'researchCandidates' | 'getProfileOptions'
   | 'manualSelect'
+  | 'publishWithoutMetadata'
   | 'listAgentMessages' | 'listAgentDecisions' | 'replyToAgentDecision' | 'listAgentToolCalls' | 'createAgentRun' | 'sendFreeformMessage'
   | 'recoverStuckAgentRun'
 >
@@ -320,6 +321,41 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
     },
   })
 
+  const publishWithoutMetadataMutation = useMutation({
+    mutationFn: () => service.publishWithoutMetadata(taskId),
+    onMutate: () => {
+      setFeedback({
+        variant: 'warning',
+        title: t('taskWorkspace.noMetadataPublishSubmitted'),
+        description: t('taskWorkspace.noMetadataPublishSubmittedDesc'),
+      })
+    },
+    onSuccess: async (result) => {
+      const status = result.data.status
+      setFeedback({
+        variant: status === 'waiting_user' ? 'warning' : 'success',
+        title: status === 'waiting_user'
+          ? t('taskWorkspace.noMetadataPublishWaiting')
+          : t('taskWorkspace.noMetadataPublishDone'),
+        description: status === 'waiting_user'
+          ? t('taskWorkspace.noMetadataPublishWaitingDesc')
+          : t('taskWorkspace.noMetadataPublishDoneDesc'),
+      })
+      const taskDetailPromise = queryClient.refetchQueries({ queryKey: ['task-detail', taskId] })
+      void queryClient.refetchQueries({ queryKey: ['agent-decisions', taskId] })
+      void queryClient.refetchQueries({ queryKey: ['agent-messages', taskId] })
+      void queryClient.invalidateQueries({ queryKey: ['flows'] })
+      await taskDetailPromise
+    },
+    onError: (err) => {
+      setFeedback({
+        variant: 'error',
+        title: t('taskWorkspace.noMetadataPublishFailed'),
+        description: err instanceof Error ? err.message : t('taskWorkspace.noMetadataPublishFailedDesc'),
+      })
+    },
+  })
+
   const handleSearch = () => {
     const normalizedKeyword = keyword.trim()
     if (!normalizedKeyword) return
@@ -329,6 +365,12 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const handleSelect = (candidate: MetadataCandidateDto) => {
     if (isAgentRunning) return
     manualSelectMutation.mutate(candidate)
+  }
+
+  const handlePublishWithoutMetadata = () => {
+    if (isAgentRunning || publishWithoutMetadataMutation.isPending) return
+    if (!window.confirm(t('taskWorkspace.noMetadataPublishConfirm'))) return
+    publishWithoutMetadataMutation.mutate()
   }
 
   return (
@@ -344,6 +386,22 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
           title={t('taskWorkspace.manualMetadataResearchBlockedTitle')}
           description={t('taskWorkspace.manualMetadataResearchBlocked')}
         />
+      ) : null}
+
+      {!isAgentRunning && !detail.metadata_detail ? (
+        <div className="flex flex-col gap-2 rounded-md border border-amber-200/70 bg-amber-50/70 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30 md:flex-row md:items-center md:justify-between">
+          <p className="text-muted-foreground">{t('taskWorkspace.noMetadataPublishHint')}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={publishWithoutMetadataMutation.isPending}
+            onClick={handlePublishWithoutMetadata}
+          >
+            {publishWithoutMetadataMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {publishWithoutMetadataMutation.isPending ? t('taskWorkspace.noMetadataPublishing') : t('taskWorkspace.publishWithoutMetadata')}
+          </Button>
+        </div>
       ) : null}
 
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">

@@ -76,6 +76,7 @@ function buildMockFlows(): FlowSummary[] {
       ingest_task_id: t.id,
       download_task_id: t.download_task?.id ?? null,
       total_status: t.total_status,
+      metadata_status: t.metadata_status ?? 'unknown',
       title: t.title,
       year: t.year,
       media_type: t.media_type,
@@ -109,6 +110,7 @@ function buildMockFlows(): FlowSummary[] {
       ingest_task_id: null,
       download_task_id: dl.id,
       total_status: dl.status,
+      metadata_status: 'unknown',
       title: dl.title,
       year: null,
       media_type: null,
@@ -1028,6 +1030,27 @@ export function createMockTaskService(): TaskService {
         candidate_id: 'mock-candidate-manual',
         decision_id: null,
         blocking_reasons: [],
+      })
+    },
+
+    async publishWithoutMetadata(taskId: string) {
+      const task = findTaskOrThrow(state, taskId)
+      updateTaskSummary(task, (summary) => {
+        summary.metadata_status = 'none'
+        summary.status_summary = {
+          ...summary.status_summary,
+          status: 'library_import_complete',
+          current_step: 'library_import_complete',
+          latest_message: '已按无元数据方式入库',
+        }
+      })
+      return createSuccessEnvelope({
+        status: 'published',
+        metadata_status: 'none' as const,
+        final_target_dir: '/data/library/mock-no-metadata',
+        final_target_file: '/data/library/mock-no-metadata/mock.mkv',
+        cleanup_decision_requested: false,
+        decision_id: null,
       })
     },
 

@@ -43,6 +43,7 @@ function createTaskSummary(overrides: Partial<TaskSummary> & Pick<TaskSummary, '
     can_confirm: false,
     flow_type: 'external_import',
     total_status: computedTotalStatus,
+    metadata_status: 'unknown',
     file_format: null,
     download_task: null,
     created_at: '2026-05-08T10:00:00+08:00',

@@ -325,6 +325,7 @@ def map_to_task_summaries(
                 title=title,
                 year=year,
                 media_type=task.media_type,  # type: ignore[arg-type]
+                metadata_status=getattr(task, "metadata_status", "unknown") or "unknown",
                 can_confirm=_can_confirm(agent_status_index.get(task.id)),
                 flow_type=(
                     "managed_download" if download_summary is not None

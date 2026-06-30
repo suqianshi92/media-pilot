@@ -59,6 +59,12 @@ def handle_overwrite_target(
 
     task_id = decision.task_id
 
+    payload = decision.payload if isinstance(getattr(decision, "payload", None), dict) else {}
+    if payload.get("publish_mode") == "no_metadata":
+        return _handle_overwrite_no_metadata_target(
+            session=session, config=config, decision=decision,
+        )
+
     task_repo = IngestTaskRepository(session)
     task = task_repo.get(task_id)
     if task is None:
@@ -139,6 +145,7 @@ def handle_overwrite_target(
     if write_result.status in ("succeeded", "warning"):
         task.status = IngestTaskStatus.LIBRARY_IMPORT_COMPLETE
         task.current_step = IngestTaskStatus.LIBRARY_IMPORT_COMPLETE
+        task.metadata_status = "complete"
         # 关联 AgentRun 标记为 completed
         run_repo = AgentRunRepository(session)
         run = run_repo.get(decision.run_id)
@@ -159,6 +166,50 @@ def handle_overwrite_target(
         "detail": f"Movie overwrite ended with status={write_result.status}",
         "retryable": True,
     })
+
+
+def _handle_overwrite_no_metadata_target(
+    *,
+    session: Session,
+    config: AppConfig,
+    decision,
+):
+    from media_pilot.repository.repositories import AgentRunRepository, IngestTaskRepository
+    from media_pilot.services.no_metadata_publish import publish_without_metadata
+    from media_pilot.services.post_publish_cleanup import run_post_publish_source_cleanup
+
+    task_id = decision.task_id
+    task_repo = IngestTaskRepository(session)
+    task = task_repo.get(task_id)
+    if task is None:
+        raise ValueError({"status_code": 404, "detail": f"Task {task_id} not found"})
+
+    result = publish_without_metadata(
+        session=session, config=config, task_id=task_id, force_overwrite=True,
+        allow_agent_running=True,
+    )
+    if result.status != "published":
+        raise ValueError({
+            "status_code": 422,
+            "code": "no_metadata_write_failed",
+            "detail": result.summary,
+            "retryable": True,
+        })
+
+    cleanup = run_post_publish_source_cleanup(
+        session=session, config=config, task_id=task_id, run_id=decision.run_id,
+    )
+    run_repo = AgentRunRepository(session)
+    run = run_repo.get(decision.run_id)
+    if run is not None and not cleanup.decision_requested:
+        run_repo.update_status(run, status="completed", current_step="no_metadata_published")
+    session.flush()
+    return {
+        "outcome": "published",
+        "final_target_dir": result.final_target_dir,
+        "final_target_file": result.final_target_file,
+        "warnings": result.warnings,
+    }
 
 
 def handle_cancel_publish(

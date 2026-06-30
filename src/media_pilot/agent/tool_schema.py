@@ -37,6 +37,7 @@ FREEFORM_WRITE_TOOL_WHITELIST: frozenset[str] = frozenset({
     "persist_metadata_selection",
     "fetch_and_save_metadata_detail",
     "publish_movie_to_library",
+    "publish_without_metadata",
     "revoke_publish",
     "handle_source_cleanup",
 })

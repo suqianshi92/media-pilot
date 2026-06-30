@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 
 import { ToastProvider } from '@/components/shared/toast'
 import { createMockTaskService } from '@/mocks/service'
+import type { FlowSummary } from '@/types/task'
 import type { FlowFilter } from '@/services/api-client'
 
 import { TaskListPage, type TaskListService } from './task-list-page'
@@ -51,6 +52,105 @@ describe('TaskListPage', () => {
       expect(screen.getByRole('button', { name: '待确认' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '已完成' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: '失败' })).toBeInTheDocument()
+    })
+  })
+
+  it('supports no-metadata filter and shows no-metadata title badge', async () => {
+    const user = userEvent.setup()
+    const service = createMockTaskService()
+    service.reset()
+
+    const noMetadataFlow: FlowSummary = {
+      id: 'ingest:task-no-metadata',
+      flow_type: 'external_import',
+      route_target: 'task_detail',
+      ingest_task_id: 'task-no-metadata',
+      download_task_id: null,
+      total_status: 'processing',
+      metadata_status: 'none',
+      title: '缺元数据任务',
+      year: 2021,
+      media_type: 'movie',
+      can_confirm: true,
+      file_format: null,
+      source_path: '/data/downloads/no-metadata.mkv',
+      created_at: '2026-05-01T10:00:00+08:00',
+      updated_at: '2026-05-01T10:00:00+08:00',
+      status_summary: {
+        status: 'processing',
+        current_step: 'metadata_detail',
+        failure_reason: null,
+        confidence: 0.8,
+        confidence_level: 'medium',
+        latest_message: 'processing',
+      },
+      download_task: null,
+      agent_status_summary: null,
+    }
+
+    const completeFlow: FlowSummary = {
+      id: 'ingest:task-complete',
+      flow_type: 'external_import',
+      route_target: 'task_detail',
+      ingest_task_id: 'task-complete',
+      download_task_id: null,
+      total_status: 'processing',
+      metadata_status: 'complete',
+      title: '有元数据任务',
+      year: 2020,
+      media_type: 'movie',
+      can_confirm: false,
+      file_format: null,
+      source_path: '/data/downloads/with-metadata.mkv',
+      created_at: '2026-05-01T10:01:00+08:00',
+      updated_at: '2026-05-01T10:01:00+08:00',
+      status_summary: {
+        status: 'processing',
+        current_step: 'metadata_detail',
+        failure_reason: null,
+        confidence: 0.9,
+        confidence_level: 'high',
+        latest_message: 'processing',
+      },
+      download_task: null,
+      agent_status_summary: null,
+    }
+
+    const metadataFilterService: TaskListService = {
+      ...service,
+      async listFlows(params: { filter?: string; page?: number; page_size?: number } = {}) {
+        const filter = params.filter ?? 'all'
+        const allItems = [noMetadataFlow, completeFlow]
+        const filteredItems = filter === 'no_metadata'
+          ? allItems.filter((flow) => flow.metadata_status === 'none')
+          : allItems
+        const page = params.page ?? 1
+        const pageSize = (params.page_size ?? filteredItems.length) || 1
+        const start = (page - 1) * pageSize
+
+        return {
+          status: 'success' as const,
+          data: { items: filteredItems.slice(start, start + pageSize) },
+          messages: [],
+          meta: { page, page_size: pageSize, total: filteredItems.length, filters: { filter } },
+        }
+      },
+    }
+
+    renderTaskListPage(metadataFilterService)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '无元数据' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '无元数据' }))
+    await waitFor(() => {
+      const badges = screen.getAllByText('无元数据').filter((node) => (
+        node instanceof HTMLElement && node.className.includes('rounded-full')
+      ))
+      expect(badges.length).toBe(2)
+      expect(screen.getAllByText(/缺元数据任务 \(2021\)/).length).toBe(2)
+      expect(screen.queryByText('有元数据任务')).not.toBeInTheDocument()
     })
   })
 

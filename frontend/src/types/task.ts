@@ -149,6 +149,8 @@ export interface AgentStatusSummary {
   latest_message_summary: string | null
 }
 
+export type MetadataStatus = 'unknown' | 'complete' | 'none'
+
 export interface TaskSummary {
   id: string
   source_path: string
@@ -158,6 +160,7 @@ export interface TaskSummary {
   can_confirm: boolean
   flow_type: FlowType
   total_status: string
+  metadata_status?: MetadataStatus
   file_format: string | null
   created_at: string
   updated_at: string
@@ -178,6 +181,7 @@ export interface FlowSummary {
   ingest_task_id: string | null
   download_task_id: string | null
   total_status: string
+  metadata_status?: MetadataStatus
   title: string | null
   year: number | null
   media_type: MediaType | null

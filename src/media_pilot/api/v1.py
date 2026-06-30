@@ -75,6 +75,9 @@ _DECISION_REPLY_SUCCESS_STATUSES = frozenset({
     # error, 前端 DecisionReplyCard 走 onError 弹红 toast, 详情页状态
     # 标签 / Agent 面板右上 / 列表缓存都不刷新.
     "metadata_published",
+    "no_metadata_published",
+    "no_metadata_published_cleanup_pending",
+    "metadata_unavailable_cancelled",
 })
 
 
@@ -1310,6 +1313,169 @@ def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnv
         messages=[ApiMessage(
             level="info", code=f"manual_select_{result.status}",
             text=result.summary,
+        )],
+        meta={},
+    )
+
+
+@router.post("/tasks/{task_id}/publish-without-metadata")
+def publish_task_without_metadata(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
+    """显式确认后执行无元数据入库。"""
+    session_factory: sessionmaker[Session] | None = getattr(
+        request.app.state, "session_factory", None
+    )
+    config: AppConfig | None = getattr(request.app.state, "config", None)
+
+    if session_factory is None or config is None:
+        return ApiEnvelope(status="error", data={}, messages=[
+            ApiMessage(level="error", code="not_configured", text="未配置数据库或服务")
+        ], meta={})
+
+    if not body.get("confirmed"):
+        return ApiEnvelope(status="error", data={}, messages=[
+            ApiMessage(level="error", code="not_confirmed", text="需显式确认无元数据入库")
+        ], meta={})
+
+    from media_pilot.orchestration.db_retry import safe_commit
+    from media_pilot.repository.repositories import (
+        AgentDecisionRequestCreate,
+        AgentDecisionRequestRepository,
+        AgentRunCreate,
+        AgentRunRepository,
+        IngestTaskRepository,
+    )
+    from media_pilot.services.no_metadata_publish import publish_without_metadata
+    from media_pilot.services.post_publish_cleanup import run_post_publish_source_cleanup
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).get(task_id)
+        if task is None:
+            return ApiEnvelope(status="error", data={}, messages=[
+                ApiMessage(level="error", code="task_not_found", text="任务不存在")
+            ], meta={})
+
+        run_repo = AgentRunRepository(session)
+        run = run_repo.get_active_or_waiting_by_task(task_id)
+        if run is None:
+            run = run_repo.create(AgentRunCreate(
+                task_id=task_id,
+                current_step="no_metadata_publish",
+            ))
+
+        result = publish_without_metadata(
+            session=session, config=config, task_id=task_id,
+        )
+        if result.status == "target_conflict":
+            try:
+                decision = AgentDecisionRequestRepository(session).create(
+                    AgentDecisionRequestCreate(
+                        run_id=run.id,
+                        task_id=task_id,
+                        decision_type="target_conflict",
+                        question=f"目标 {result.final_target_dir} 已被占用。请选择处理方式。",
+                        free_text_allowed=False,
+                        options=[
+                            {
+                                "id": "overwrite_target",
+                                "label": "覆盖发布目标",
+                                "description": "覆盖已存在的发布目标。",
+                            },
+                            {
+                                "id": "cancel_publish",
+                                "label": "取消本次发布",
+                                "description": "任务进入失败态，等待后续处理。",
+                            },
+                        ],
+                        payload={
+                            "publish_mode": "no_metadata",
+                            "final_target_dir": result.final_target_dir,
+                            "final_target_file": result.final_target_file,
+                            "conflict": "no_metadata_target_conflict",
+                        },
+                    )
+                )
+            except ValueError:
+                return JSONResponse(
+                    status_code=409,
+                    content=ApiEnvelope(
+                        status="error",
+                        data={"status": "waiting_user"},
+                        messages=[ApiMessage(
+                            level="error",
+                            code="pending_decision_exists",
+                            text="已有待处理决策，请先处理当前决策",
+                        )],
+                        meta={"retryable": False},
+                    ).model_dump(),
+                )
+            IngestTaskRepository(session).update_status(
+                task, status="waiting_user", current_step="target_conflict",
+            )
+            run_repo.update_status(run, status="waiting_user", current_step="target_conflict")
+            try:
+                safe_commit(session)
+            except OperationalError:
+                return _db_locked_response()
+            return ApiEnvelope(
+                status="success",
+                data={
+                    "status": "waiting_user",
+                    "decision_id": decision.id,
+                    "metadata_status": "unknown",
+                },
+                messages=[ApiMessage(
+                    level="info",
+                    code="target_conflict_pending",
+                    text="target_conflict_pending",
+                )],
+                meta={},
+            )
+
+        if result.status != "published":
+            try:
+                safe_commit(session)
+            except OperationalError:
+                return _db_locked_response()
+            return JSONResponse(
+                status_code=409,
+                content=ApiEnvelope(
+                    status="error",
+                    data={
+                        "status": result.status,
+                        "blocking_reasons": result.blocking_reasons,
+                    },
+                    messages=[ApiMessage(
+                        level="error",
+                        code="publish_without_metadata_failed",
+                        text=result.summary,
+                    )],
+                    meta={},
+                ).model_dump(),
+            )
+
+        cleanup = run_post_publish_source_cleanup(
+            session=session, config=config, task_id=task_id, run_id=run.id,
+        )
+        if not cleanup.decision_requested:
+            run_repo.update_status(run, status="completed", current_step="no_metadata_published")
+        try:
+            safe_commit(session)
+        except OperationalError:
+            return _db_locked_response()
+
+    return ApiEnvelope(
+        status="success",
+        data={
+            "status": "published",
+            "metadata_status": "none",
+            "final_target_dir": result.final_target_dir,
+            "final_target_file": result.final_target_file,
+            "cleanup_decision_requested": cleanup.decision_requested,
+        },
+        messages=[ApiMessage(
+            level="info",
+            code="no_metadata_published",
+            text="no_metadata_published",
         )],
         meta={},
     )

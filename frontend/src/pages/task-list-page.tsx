@@ -54,6 +54,7 @@ const filterKeys: Array<{ value: FlowFilter; key: string }> = [
   { value: 'processing', key: 'taskList.filter_processing' },
   { value: 'library_import_complete', key: 'taskList.filter_completed' },
   { value: 'failed', key: 'taskList.filter_failed' },
+  { value: 'no_metadata', key: 'taskList.filter_noMetadata' },
 ]
 
 
@@ -72,6 +73,28 @@ function compactPath(path: string) {
 function formatTaskTitle(task: FlowSummary) {
   if (!task.title) return i18n.t('taskList.untitledTask', '待识别任务')
   return task.year ? `${task.title} (${task.year})` : task.title
+}
+
+function renderTaskTitle(task: FlowSummary, t: (key: string) => string) {
+  const titleText = formatTaskTitle(task)
+  return (
+    <div className="grid gap-1">
+      <div className="flex min-w-0 items-center gap-2">
+        <Link
+          to={flowDetailHref(task)}
+          className="font-medium text-surface-foreground hover:text-primary transition-colors block truncate"
+          title={titleText}
+        >
+          {titleText}
+        </Link>
+        {task.metadata_status === 'none' && (
+          <span className="inline-flex items-center rounded-full border border-amber-300/70 px-2 py-0.5 text-[11px] font-medium text-amber-700 bg-amber-50/80 dark:bg-amber-950/40">
+            {t('taskList.noMetadata')}
+          </span>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function formatTime(iso: string) {
@@ -130,16 +153,9 @@ const taskColumns = (t: (key: string) => string): ColumnDef<FlowSummary, any>[] 
     header: t('taskList.title_col'),
     cell: (info) => {
       const f = info.getValue()
-      const titleText = formatTaskTitle(f)
       return (
         <div className="min-w-0">
-          <Link
-            to={flowDetailHref(f)}
-            className="font-medium text-surface-foreground hover:text-primary transition-colors block truncate"
-            title={titleText}
-          >
-            {titleText}
-          </Link>
+          {renderTaskTitle(f, t)}
           <p className="text-xs text-muted-foreground mt-0.5 truncate" title={f.source_path ?? ''}>
             {f.source_path ? compactPath(f.source_path) : '—'}
           </p>
@@ -332,7 +348,7 @@ function FlowCard({ flow, onDeleteRequest, onPauseResume, onRetrySync }: { flow:
       <div className="flex items-start justify-between gap-2">
         <div className="grid min-w-0 gap-1">
           <TotalStatusBadge status={flow.total_status} />
-          <h2 className="text-sm font-medium text-surface-foreground">{formatTaskTitle(flow)}</h2>
+          <div>{renderTaskTitle(flow, t)}</div>
           <span className="font-mono text-xs text-muted-foreground truncate" title={flow.source_path ?? ''}>
             {flow.source_path ? compactPath(flow.source_path) : '—'}
           </span>

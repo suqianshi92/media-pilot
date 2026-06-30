@@ -28,6 +28,9 @@ class IngestTask(Base):
     title: Mapped[str | None] = mapped_column(String(512))
     year: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
+    metadata_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown"
+    )
     confidence: Mapped[float | None] = mapped_column(Float)
     current_step: Mapped[str | None] = mapped_column(String(128))
     failure_reason: Mapped[str | None] = mapped_column(String(2048))

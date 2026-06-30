@@ -66,6 +66,7 @@ VALID_FILTERS = frozenset({
     "processing",
     "library_import_complete",
     "failed",
+    "no_metadata",
 })
 
 
@@ -92,6 +93,8 @@ def _filter_statuses(name: str) -> frozenset[str] | None:
         return PRIORITY_4_DONE
     if name == "failed":
         return PRIORITY_3_FAILED
+    if name == "no_metadata":
+        return None
     raise ValueError(f"unknown filter: {name}")
 
 
@@ -124,6 +127,7 @@ def _ingest_summary_to_flow(task: TaskSummary) -> FlowSummary:
         title=task.title,
         year=task.year,
         media_type=task.media_type,
+        metadata_status=task.metadata_status,
         can_confirm=task.can_confirm,
         file_format=task.file_format,
         source_path=task.source_path,
@@ -155,6 +159,7 @@ def _download_only_flow(dl: DownloadTaskSummary) -> FlowSummary:
         title=dl.title,
         year=None,
         media_type=None,
+        metadata_status="unknown",
         can_confirm=False,
         file_format=None,
         source_path=dl.save_path,
@@ -209,7 +214,9 @@ def build_flows(
 
     # 4) filter
     allowed_statuses = _filter_statuses(filter_name or "all")
-    if allowed_statuses is not None:
+    if (filter_name or "all") == "no_metadata":
+        flows = [f for f in flows if f.metadata_status == "none"]
+    elif allowed_statuses is not None:
         flows = [f for f in flows if f.total_status in allowed_statuses]
 
     # 5) attention priority 排序 + 同 priority 内 updated_at desc → created_at desc → id asc
