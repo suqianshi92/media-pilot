@@ -27,6 +27,7 @@ from media_pilot.repository.database import (
 )
 from media_pilot.repository.models import (
     AgentDecisionRequest,
+    AgentMessage,
     AgentRun,
     IngestTask,
     MediaCandidate,
@@ -1016,6 +1017,18 @@ def test_manual_select_completed_task_revokes_before_republish(
     assert result.status == "published", result.summary
     assert calls == ["publish"]
     assert not (config.movies_dir / "Old Movie (2025)").exists()
+    with session_factory() as session:
+        run = session.scalars(select(AgentRun).where(AgentRun.task_id == task_id)).one()
+        assert run.status == "completed"
+        assert run.current_step == "manual_metadata_published"
+        messages = session.scalars(
+            select(AgentMessage).where(AgentMessage.run_id == run.id)
+        ).all()
+        assert any(
+            msg.content.startswith("[SystemAction] 用户手动选择了 Correct Movie")
+            and "系统已自动完成发布" in msg.content
+            for msg in messages
+        )
 
 
 def test_manual_select_completed_task_with_missing_source_republishes_from_library_output(
@@ -1134,6 +1147,17 @@ def test_manual_select_completed_task_with_missing_source_republishes_from_libra
         task = session.get(IngestTask, task_id)
         assert task is not None
         assert task.status == "library_import_complete"
+        run = session.scalars(select(AgentRun).where(AgentRun.task_id == task_id)).one()
+        assert run.status == "completed"
+        assert run.current_step == "manual_metadata_published"
+        messages = session.scalars(
+            select(AgentMessage).where(AgentMessage.run_id == run.id)
+        ).all()
+        assert any(
+            msg.content.startswith("[SystemAction] 用户手动选择了 Correct Movie")
+            and "系统已自动完成发布" in msg.content
+            for msg in messages
+        )
         assert task.current_step == "library_import_complete"
         assert task.title == "Test Movie"
         assert task.year == 2026

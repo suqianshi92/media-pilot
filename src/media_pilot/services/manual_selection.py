@@ -514,18 +514,33 @@ def _complete_manual_selection_run(session: Session, task_id: str) -> None:
     session.flush()
 
 
+def _ensure_manual_selection_message_run(session: Session, task_id: str):
+    """确保手动选择动作有可写入对话的 system run。
+
+    对已完成任务重新选择元数据时，旧 AgentRun 通常已经 completed。
+    这里仅为记录 SystemAction 创建一个轻量 run；发布成功后会被
+    _complete_manual_selection_run 收口，不参与 LLM。
+    """
+    from media_pilot.repository.repositories import AgentRunCreate, AgentRunRepository
+
+    run_repo = AgentRunRepository(session)
+    existing = run_repo.get_active_or_waiting_by_task(task_id)
+    if existing is not None:
+        return existing
+    return run_repo.create(AgentRunCreate(
+        task_id=task_id,
+        current_step="manual_metadata_selection",
+    ))
+
+
 def _write_system_message(session: Session, task_id: str, content: str) -> None:
     """在 Agent 对话中写入系统生成的消息。"""
     from media_pilot.repository.repositories import (
         AgentMessageCreate,
         AgentMessageRepository,
-        AgentRunRepository,
     )
 
-    run_repo = AgentRunRepository(session)
-    run = run_repo.get_active_or_waiting_by_task(task_id)
-    if run is None:
-        return
+    run = _ensure_manual_selection_message_run(session, task_id)
 
     msg_repo = AgentMessageRepository(session)
     msg_repo.create(AgentMessageCreate(
