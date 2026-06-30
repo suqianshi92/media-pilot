@@ -26,6 +26,7 @@ from media_pilot.services.disc_input import (
     is_iso_image,
     resolve_bdmv_movie_source,
 )
+from media_pilot.services.source_path_safety import is_safe_ingest_source_path
 from media_pilot.services.task_input_analysis import (
     FileInfo,
     analyze_task_input,
@@ -87,24 +88,9 @@ class ComplexInputAnalysis:
     # single_video_ready
 
 
-def _is_within_safe_roots(path: Path, config: AppConfig) -> bool:
+def _is_within_safe_roots(path: Path, config: AppConfig, *, task_id: str | None = None) -> bool:
     """检查源路径是否位于 downloads / watch / workspace 受控输入根内."""
-    safe_roots = [
-        config.downloads_dir,
-        config.watch_dir,
-        config.workspace_dir,
-    ]
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return False
-    for root in safe_roots:
-        try:
-            if root.exists() and resolved.is_relative_to(root.resolve()):
-                return True
-        except (OSError, ValueError):
-            continue
-    return False
+    return is_safe_ingest_source_path(path, config, task_id=task_id)
 
 
 _SXXEXX_PATTERN = re.compile(r"\bs(\d{1,2})[ex](\d{1,2})\b", re.IGNORECASE)
@@ -267,6 +253,7 @@ def prepare_complex_input_decision(
     *,
     config: AppConfig,
     source_path: Path,
+    task_id: str | None = None,
     user_selection: dict | None = None,
 ) -> ComplexInputDecision:
     """复杂电影输入分析与决策生成.
@@ -289,7 +276,7 @@ def prepare_complex_input_decision(
             reason="source_path_not_found",
         )
 
-    if not _is_within_safe_roots(source_path, config):
+    if not _is_within_safe_roots(source_path, config, task_id=task_id):
         return ComplexInputDecision(
             status="unsafe_path",
             reason="source_path_outside_safe_roots",
@@ -373,7 +360,11 @@ def prepare_complex_input_decision(
     )
     if user_selected_path:
         chosen = Path(user_selected_path)
-        if chosen.exists() and chosen.is_file() and _is_within_safe_roots(chosen, config):
+        if (
+            chosen.exists()
+            and chosen.is_file()
+            and _is_within_safe_roots(chosen, config, task_id=task_id)
+        ):
             # 用用户选的主视频做单视频上下文 (含同源字幕).
             from media_pilot.services.task_input_analysis import (
                 _find_same_stem_subtitles,

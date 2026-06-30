@@ -81,6 +81,7 @@ def _handle_prepare_complex_input_decision(
     decision = prepare_complex_input_decision(
         config=context.config,
         source_path=Path(task.source_path),
+        task_id=task.id,
         user_selection=user_selection,
     )
 

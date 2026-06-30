@@ -18,6 +18,7 @@ from media_pilot.services.disc_input import (
     is_iso_image as is_iso_image_path,
     resolve_bdmv_movie_source,
 )
+from media_pilot.services.source_path_safety import is_safe_ingest_source_path
 from media_pilot.services.task_input_analysis import (
     FileInfo,
     analyze_task_input,
@@ -221,20 +222,7 @@ def check_eligibility(
     is_complex = analysis.is_directory and analysis.video_count > 1
 
     # Gate 4: Path safety check
-    safe_roots = [
-        config.downloads_dir,
-        config.watch_dir,
-        config.workspace_dir,
-        config.movies_dir,
-        config.shows_dir,
-    ]
-    source_resolved = source_path.resolve()
-    is_safe_path = any(
-        source_resolved.is_relative_to(root.resolve())
-        for root in safe_roots
-        if root.exists()
-    )
-    if not is_safe_path:
+    if not is_safe_ingest_source_path(source_path, config, task_id=task.id):
         blocking.append("source_path_outside_safe_roots")
 
     # ── metadata threshold check (soft gate) ────────────────────────

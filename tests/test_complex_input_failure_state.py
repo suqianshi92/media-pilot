@@ -121,6 +121,48 @@ class TestScanFailedTransitionsToAgentFailed:
 
 
 class TestUnsafePathTransitionsToAgentFailed:
+    def test_task_scoped_library_staging_path_is_allowed(
+        self, tmp_path: Path,
+    ):
+        from dataclasses import replace
+
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        adult_movies_dir = tmp_path / "adult"
+        config = replace(config, adult_movies_dir=adult_movies_dir)
+
+        with sf() as session:
+            task = _make_task(
+                session,
+                str(config.downloads_dir / "placeholder.mkv"),
+                media_type="movie",
+            )
+            staged = (
+                adult_movies_dir
+                / ".media-pilot-staging"
+                / task.id
+                / "republish-source"
+                / "movie.mkv"
+            )
+            staged.parent.mkdir(parents=True)
+            staged.write_bytes(b"x")
+            task.source_path = str(staged)
+            run = _make_run(session, task.id, status="active")
+            result = _invoke_prepare_tool(
+                session=session, config=config,
+                task_id=task.id, run_id=run.id,
+            )
+            session.commit()
+            assert result.status == "success"
+            assert result.data["ready"] is True
+
+        with sf() as session:
+            from media_pilot.repository.repositories import IngestTaskRepository
+            task = IngestTaskRepository(session).get(task.id)
+            assert task.status != "agent_failed"
+
     def test_path_outside_safe_roots_marks_task_agent_failed(
         self, tmp_path: Path,
     ):

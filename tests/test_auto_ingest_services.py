@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -128,6 +129,58 @@ class TestEligibility:
             assert "no_metadata_candidates" in result.blocking_reasons
             assert result.video_count == 1
             assert result.is_single_file is True
+
+    def test_task_scoped_library_staging_source_is_safe(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        adult_movies_dir = tmp_path / "adult"
+        config = replace(config, adult_movies_dir=adult_movies_dir)
+        adult_movies_dir.mkdir(parents=True)
+
+        with sf() as session:
+            task = _make_task(session, source_path=str(config.downloads_dir / "placeholder.mkv"))
+            task_id = task.id
+
+            staged = (
+                adult_movies_dir
+                / ".media-pilot-staging"
+                / task_id
+                / "republish-source"
+                / "movie.mkv"
+            )
+            staged.parent.mkdir(parents=True)
+            staged.write_bytes(b"movie")
+            task.source_path = str(staged)
+            _make_candidate(session, task_id, confidence=0.95)
+            session.commit()
+
+        with sf() as session:
+            from media_pilot.services.auto_ingest import check_eligibility
+            result = check_eligibility(session=session, config=config, task_id=task_id)
+            assert "source_path_outside_safe_roots" not in result.blocking_reasons
+
+    def test_library_publish_dir_is_not_safe_source_root(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        published = config.movies_dir / "Published Movie (2026)"
+        published.mkdir(parents=True)
+        video = published / "movie.mkv"
+        video.write_bytes(b"movie")
+
+        with sf() as session:
+            task = _make_task(session, source_path=str(video), media_type="movie")
+            task_id = task.id
+            _make_candidate(session, task_id, confidence=0.95)
+            session.commit()
+
+        with sf() as session:
+            from media_pilot.services.auto_ingest import check_eligibility
+            result = check_eligibility(session=session, config=config, task_id=task_id)
+            assert "source_path_outside_safe_roots" in result.blocking_reasons
 
     def test_eligible_single_movie(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
