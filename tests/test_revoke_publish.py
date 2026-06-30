@@ -532,6 +532,69 @@ def test_revoke_cleans_publish_context_preserves_metadata(tmp_path: Path):
         ).first() is not None
 
 
+def test_revoke_delete_task_data_removes_write_plan_before_task(tmp_path: Path):
+    """源文件缺失导致撤销删除任务数据时, WritePlan 必须先删避免 FK 残留。"""
+    from media_pilot.orchestration.revoke_publish import execute_revoke_publish
+    from media_pilot.repository.models import WritePlan as WP
+
+    publish_dir = str(tmp_path / "library" / "movies" / "Published Movie (2026)")
+    missing_source = tmp_path / "downloads" / "missing.mkv"
+    Path(publish_dir).mkdir(parents=True, exist_ok=True)
+    Path(publish_dir).joinpath("Published Movie (2026).mkv").write_bytes(b"movie")
+
+    config = AppConfig(
+        downloads_dir=missing_source.parent,
+        watch_dir=tmp_path / "watch",
+        workspace_dir=tmp_path / "workspace",
+        movies_dir=tmp_path / "library" / "movies",
+        shows_dir=tmp_path / "library" / "shows",
+        database_dir=tmp_path / "db",
+        tmdb_api_key="test-key",
+    )
+    for d in (config.downloads_dir, config.workspace_dir, config.movies_dir, config.shows_dir, config.database_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).create(IngestTaskCreate(
+            source_path=str(missing_source),
+            status="library_import_complete",
+            current_step="library_import_complete",
+        ))
+        session.add(MediaSourceSelection(
+            task_id=task.id,
+            input_path=str(missing_source),
+            selected_path=str(missing_source),
+            payload={},
+        ))
+        session.add(WriteResult(
+            task_id=task.id,
+            status="succeeded",
+            payload={"target_dir": publish_dir},
+        ))
+        session.add(WP(
+            task_id=task.id,
+            target_dir=publish_dir,
+            target_file=str(Path(publish_dir) / "Published Movie (2026).mkv"),
+            nfo_path=str(Path(publish_dir) / "Published Movie (2026).nfo"),
+            payload={},
+        ))
+        session.commit()
+        task_id = task.id
+
+    with session_factory() as session:
+        result = execute_revoke_publish(session, task_id=task_id)
+        assert result.status == "deleted"
+
+    with session_factory() as session:
+        assert session.get(IngestTask, task_id) is None
+        assert session.scalars(
+            select(WP).where(WP.task_id == task_id)
+        ).first() is None
+
+
 def test_execute_revoke_skip_sets_processing_status(tmp_path: Path):
     """撤销发布(skip_post_revoke_decision=True) 将任务置为 processing +
     post_revoke_reingest，而非停留在 agent_running 或 library_import_complete。"""

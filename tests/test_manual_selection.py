@@ -942,7 +942,7 @@ def test_manual_select_supersedes_pending_decisions_before_publishing(
         )
         session.commit()
 
-    assert result.status == "published"
+    assert result.status == "published", result.summary
 
     with session_factory() as session:
         decision = session.get(AgentDecisionRequest, decision_id)
@@ -984,6 +984,21 @@ def test_manual_select_completed_task_revokes_before_republish(
         source_path=str(source_path),
         status="library_import_complete",
     )
+    with session_factory() as session:
+        from media_pilot.repository.models import MediaSourceSelection, WriteResult
+
+        session.add(MediaSourceSelection(
+            task_id=task_id,
+            input_path=str(source_path),
+            selected_path=str(source_path),
+            payload={},
+        ))
+        session.add(WriteResult(
+            task_id=task_id,
+            status="succeeded",
+            payload={"target_dir": str(config.movies_dir / "Old Movie (2025)")},
+        ))
+        session.commit()
 
     calls: list[str] = []
 
@@ -1023,8 +1038,140 @@ def test_manual_select_completed_task_revokes_before_republish(
         )
         session.commit()
 
-    assert result.status == "published"
+    assert result.status == "published", result.summary
     assert calls == ["revoke:True", "publish"]
+
+
+def test_manual_select_completed_task_with_missing_source_republishes_from_library_output(
+    tmp_path: Path, monkeypatch, stub_dependencies,
+) -> None:
+    """已发布任务源文件被清理后, 人工改元数据应复用已发布主视频而不是删除任务。"""
+    from media_pilot.repository.models import (
+        FileAsset,
+        MediaSourceSelection,
+        WritePlan,
+        WriteResult,
+    )
+    from media_pilot.services import auto_ingest
+    from media_pilot.services.manual_selection import submit_manual_selection
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    missing_source = config.downloads_dir / "already-trashed.mkv"
+    old_publish_dir = config.movies_dir / "Wrong Movie (2024)"
+    old_publish_dir.mkdir(parents=True)
+    old_video = old_publish_dir / "Wrong Movie (2024).mkv"
+    old_video.write_bytes(b"published movie")
+
+    task_id = _make_task(
+        session_factory,
+        source_path=str(missing_source),
+        status="library_import_complete",
+    )
+
+    with session_factory() as session:
+        session.add(MediaSourceSelection(
+            task_id=task_id,
+            input_path=str(missing_source),
+            selected_path=str(missing_source),
+            confidence=1.0,
+            reason="source_was_cleaned",
+            payload={"selection_source": "original_source"},
+        ))
+        session.add(WritePlan(
+            task_id=task_id,
+            target_dir=str(old_publish_dir),
+            target_file=str(old_video),
+            nfo_path=str(old_publish_dir / "Wrong Movie (2024).nfo"),
+            payload={},
+        ))
+        session.add(WriteResult(
+            task_id=task_id,
+            status="succeeded",
+            payload={
+                "target_dir": str(old_publish_dir),
+                "target_file": str(old_video),
+            },
+        ))
+        session.add(FileAsset(
+            task_id=task_id,
+            role="library_video",
+            path=str(old_video),
+            size_bytes=old_video.stat().st_size,
+        ))
+        session.commit()
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class _OkEligibility:
+        eligible: bool = True
+        media_type: str = "movie"
+        candidate_count: int = 1
+        confidence_threshold: float = 0.8
+        margin: float = 0.0
+        blocking_reasons: list[str] = None
+        warnings: list[str] = None
+
+        def __post_init__(self) -> None:
+            if self.blocking_reasons is None:
+                self.blocking_reasons = []
+            if self.warnings is None:
+                self.warnings = []
+
+    monkeypatch.setattr(
+        auto_ingest,
+        "check_eligibility",
+        lambda *, session, config, task_id: _OkEligibility(),
+    )
+    monkeypatch.setattr(
+        "media_pilot.orchestration.jellyfin_movie_writer._download_image",
+        lambda client, url, path: b"poster",
+    )
+
+    with session_factory() as session:
+        result = submit_manual_selection(
+            session=session,
+            config=config,
+            task_id=task_id,
+            provider="tmdb",
+            provider_id="movie:456",
+            title="Correct Movie",
+            year=2026,
+            media_type="movie",
+        )
+        session.commit()
+
+    assert result.status == "published", result.summary
+    assert not old_publish_dir.exists()
+
+    new_publish_dir = config.movies_dir / "Test Movie (2026)"
+    assert new_publish_dir.exists()
+    assert (new_publish_dir / "Test Movie (2026).mkv").read_bytes() == b"published movie"
+    assert not (
+        config.movies_dir / ".media-pilot-staging" / task_id / "republish-source"
+    ).exists()
+
+    with session_factory() as session:
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.status == "library_import_complete"
+        assert task.current_step == "library_import_complete"
+        assert task.title == "Test Movie"
+        assert task.year == 2026
+
+        plans = session.scalars(
+            select(WritePlan).where(WritePlan.task_id == task_id)
+        ).all()
+        assert len(plans) == 1
+        assert plans[0].target_dir.endswith("Test Movie (2026)")
+
+        assets = session.scalars(
+            select(FileAsset).where(FileAsset.task_id == task_id)
+        ).all()
+        assert any(asset.role == "library_video" for asset in assets)
 
 
 def test_manual_select_publish_success_applies_trash_cleanup_policy(

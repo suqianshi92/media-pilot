@@ -294,6 +294,7 @@ def _delete_task_data(session: Session, task_id: str) -> None:
         (OperationRecord, OperationRecord.task_id),
         (FileAsset, FileAsset.task_id),
         (WriteResult, WriteResult.task_id),
+        (WritePlan, WritePlan.task_id),
         (MetadataDetail, MetadataDetail.task_id),
         (SearchKeywordRecord, SearchKeywordRecord.task_id),
         (MediaSourceSelection, MediaSourceSelection.task_id),

@@ -10,10 +10,11 @@ Agent 主线要求：所有可操作等待必须落到 `waiting_user + AgentDeci
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from media_pilot.config import AppConfig
@@ -87,7 +88,7 @@ def submit_manual_selection(
 
     if task.status == "library_import_complete":
         revoke_result = _revoke_completed_publish_for_manual_reselect(
-            session, task_id,
+            session, config, task_id,
         )
         if revoke_result is not None:
             return revoke_result
@@ -186,9 +187,14 @@ def submit_manual_selection(
     # 5. 所有门禁通过 → 确定性快捷发布
     outcome = _quick_publish(session, config, task_id)
     if outcome.kind == "published":
-        cleanup_result = _run_manual_post_publish_cleanup(
-            session=session, config=config, task_id=task_id,
-        )
+        if _cleanup_published_output_reselect_source(session, task_id):
+            cleanup_result = _skipped_cleanup_result(
+                "Published-output reselect source was temporary and has been removed.",
+            )
+        else:
+            cleanup_result = _run_manual_post_publish_cleanup(
+                session=session, config=config, task_id=task_id,
+            )
         _write_system_message(
             session, task_id,
             f"[SystemAction] 用户手动选择了 {title} ({year}) from {provider}，"
@@ -404,6 +410,7 @@ def _run_manual_post_publish_cleanup(
 
 def _revoke_completed_publish_for_manual_reselect(
     session: Session,
+    config: AppConfig,
     task_id: str,
 ) -> ManualSelectResult | None:
     """完成态手动改元数据前先撤销旧发布产物。
@@ -411,7 +418,33 @@ def _revoke_completed_publish_for_manual_reselect(
     返回 None 表示撤销成功，可继续写入新元数据；返回 ManualSelectResult
     表示撤销失败或任务已被撤销逻辑删除，调用方应停止。
     """
-    from media_pilot.orchestration.revoke_publish import execute_revoke_publish
+    from media_pilot.orchestration.revoke_publish import (
+        check_revoke_publish,
+        execute_revoke_publish,
+    )
+
+    check = check_revoke_publish(session, task_id=task_id)
+    if not check.allowed:
+        return ManualSelectResult(
+            status="agent_failed",
+            summary=f"撤销旧发布失败，无法重新入库：{check.outcome_description}",
+        )
+
+    if check.is_complex_structure:
+        return ManualSelectResult(
+            status="agent_failed",
+            summary="已发布的 BDMV / 复杂结构暂不支持通过手动重选元数据重新入库",
+        )
+
+    if not check.source_file_exists:
+        prepared = _prepare_published_output_reselect_source(
+            session=session,
+            config=config,
+            task_id=task_id,
+            publish_dir=check.publish_dir,
+        )
+        if prepared is not None:
+            return prepared
 
     try:
         result = execute_revoke_publish(
@@ -428,9 +461,155 @@ def _revoke_completed_publish_for_manual_reselect(
     if result.status == "deleted":
         return ManualSelectResult(
             status="agent_failed",
-            summary="旧发布已撤销，但源文件缺失或结构不支持，任务数据已删除，无法重新入库",
+            summary="旧发布已撤销，但源文件缺失或结构不支持，无法重新入库",
         )
     return None
+
+
+def _prepare_published_output_reselect_source(
+    *,
+    session: Session,
+    config: AppConfig,
+    task_id: str,
+    publish_dir: str | None,
+) -> ManualSelectResult | None:
+    """源文件已被清理时，把已发布主视频复制成临时重发布来源。
+
+    这是手动纠正元数据的专用兜底。不能让普通撤销发布逻辑删除任务本体；
+    也不能直接把旧发布目录作为 overwrite 来源，否则目标相同时会先删掉
+    自己的源文件。这里把当前发布出的主视频复制到同一媒体库的 staging
+    区域，再让后续撤销和发布流程按普通文件来源继续。
+    """
+    from media_pilot.repository.models import FileAsset
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
+
+    if publish_dir is None:
+        return ManualSelectResult(
+            status="agent_failed",
+            summary="旧发布记录缺少发布目录，无法从已发布产物重新入库",
+        )
+
+    publish_path = Path(publish_dir)
+    if not publish_path.exists() or not publish_path.is_dir():
+        return ManualSelectResult(
+            status="agent_failed",
+            summary=f"旧发布目录不存在，无法从已发布产物重新入库：{publish_path}",
+        )
+    if not _is_within_library_root(config, publish_path):
+        return ManualSelectResult(
+            status="agent_failed",
+            summary=f"旧发布目录不在受控媒体库根目录内，拒绝重新入库：{publish_path}",
+        )
+
+    source_file = session.scalars(
+        select(FileAsset)
+        .where(FileAsset.task_id == task_id)
+        .where(FileAsset.role == "library_video")
+        .order_by(FileAsset.created_at.desc())
+    ).first()
+    source_path = Path(source_file.path) if source_file is not None else None
+    if source_path is None or not source_path.exists() or not source_path.is_file():
+        source_path = _find_single_video_in_published_dir(publish_path)
+    if source_path is None:
+        return ManualSelectResult(
+            status="agent_failed",
+            summary="旧发布目录中没有可复用的单文件主视频，无法重新入库",
+        )
+    if not _is_within_library_root(config, source_path):
+        return ManualSelectResult(
+            status="agent_failed",
+            summary=f"旧发布主视频不在受控媒体库根目录内，拒绝重新入库：{source_path}",
+        )
+
+    staging_dir = publish_path.parent / ".media-pilot-staging" / task_id / "republish-source"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staging_source = staging_dir / source_path.name
+    shutil.copy2(source_path, staging_source)
+    for subtitle in _same_stem_subtitles(source_path):
+        shutil.copy2(subtitle, staging_dir / subtitle.name)
+
+    MediaSourceSelectionRepository(session).save(
+        task_id=task_id,
+        input_path=str(staging_dir),
+        selected_path=str(staging_source),
+        confidence=1.0,
+        reason="published_output_reselect",
+        payload={
+            "selection_source": "published_output_reselect",
+            "source_kind": "file",
+            "temporary": True,
+            "original_publish_dir": str(publish_path),
+            "original_source_path_missing": True,
+        },
+    )
+    session.flush()
+    return None
+
+
+def _is_within_library_root(config: AppConfig, path: Path) -> bool:
+    candidate = path.resolve(strict=False)
+    roots = [
+        config.movies_dir,
+        config.shows_dir,
+        getattr(config, "adult_movies_dir", None),
+    ]
+    for root in roots:
+        if root is None:
+            continue
+        try:
+            candidate.relative_to(root.resolve(strict=False))
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _find_single_video_in_published_dir(publish_path: Path) -> Path | None:
+    from media_pilot.orchestration.ingestion import MEDIA_EXTENSIONS
+
+    videos = [
+        path for path in publish_path.rglob("*")
+        if path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
+    ]
+    if len(videos) != 1:
+        return None
+    return videos[0]
+
+
+def _same_stem_subtitles(source_path: Path) -> list[Path]:
+    subtitle_exts = {".srt", ".ass", ".ssa", ".vtt", ".sub"}
+    parent = source_path.parent
+    return [
+        path for path in parent.iterdir()
+        if (
+            path.is_file()
+            and path.stem == source_path.stem
+            and path.suffix.lower() in subtitle_exts
+        )
+    ]
+
+
+def _cleanup_published_output_reselect_source(session: Session, task_id: str) -> bool:
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
+
+    selection = MediaSourceSelectionRepository(session).get_for_task(task_id)
+    payload = selection.payload if selection is not None else {}
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("selection_source") != "published_output_reselect":
+        return False
+    source_dir = Path(selection.input_path)
+    if source_dir.exists() and source_dir.is_dir():
+        shutil.rmtree(source_dir)
+    return True
+
+
+def _skipped_cleanup_result(summary: str):
+    from media_pilot.services.post_publish_cleanup import PostPublishCleanupResult
+
+    return PostPublishCleanupResult(status="success", summary=summary)
 
 
 def _clear_metadata_facts(session: Session, task_id: str) -> None:
@@ -672,13 +851,13 @@ def _create_target_conflict_decision(
     waiting_user/target_conflict，让 AgentStatusSummary.run_status 与
     pending_decision_count 保持一致。
     """
+    from media_pilot.orchestration.state_machine import IngestTaskStatus
     from media_pilot.repository.models import IngestTask
     from media_pilot.repository.repositories import (
         AgentDecisionRequestCreate,
         AgentDecisionRequestRepository,
         AgentRunRepository,
     )
-    from media_pilot.orchestration.state_machine import IngestTaskStatus
 
     run = _ensure_manual_select_run(session, task_id)
 
