@@ -753,6 +753,33 @@ def _handle_revoke_publish(context: ToolContext, input_data: dict) -> ToolResult
     task_id = input_data["task_id"]
     skip_decision = input_data.get("skip_post_revoke_decision", False)
 
+    if skip_decision:
+        from media_pilot.services.republish_source import prepare_republish_source
+
+        result = prepare_republish_source(
+            session=context.session,
+            config=context.config,
+            task_id=task_id,
+        )
+        if not result.ok:
+            return ToolResult(
+                status="failure",
+                summary=result.summary,
+                data=result.data,
+            )
+        return ToolResult(
+            status="success",
+            summary=result.summary,
+            data={
+                **result.data,
+                "status": "completed",
+                "outcome": result.summary,
+                "decision_id": None,
+                "waiting_for_post_revoke_action": False,
+                "republish_source_prepared": True,
+            },
+        )
+
     check = check_revoke_publish(context.session, task_id=task_id)
     if not check.allowed:
         return ToolResult(

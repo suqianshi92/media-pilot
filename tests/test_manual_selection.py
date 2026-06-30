@@ -990,7 +990,6 @@ def test_manual_select_completed_task_revokes_before_republish(
     tmp_path: Path, monkeypatch, stub_dependencies
 ) -> None:
     """已入库任务人工改元数据时，必须先撤销旧发布再重新发布。"""
-    from media_pilot.orchestration.revoke_publish import RevokePublishResult
     from media_pilot.services import manual_selection as ms
     from media_pilot.services.manual_selection import submit_manual_selection
 
@@ -1019,31 +1018,17 @@ def test_manual_select_completed_task_revokes_before_republish(
             status="succeeded",
             payload={"target_dir": str(config.movies_dir / "Old Movie (2025)")},
         ))
+        old_publish_dir = config.movies_dir / "Old Movie (2025)"
+        old_publish_dir.mkdir(parents=True)
+        (old_publish_dir / "Old Movie (2025).mkv").write_bytes(b"old")
         session.commit()
 
     calls: list[str] = []
-
-    def _fake_revoke(session, *, task_id, skip_post_revoke_decision=False, existing_run_id=None):
-        calls.append(f"revoke:{skip_post_revoke_decision}")
-        task = session.get(IngestTask, task_id)
-        assert task is not None
-        task.status = "processing"
-        task.current_step = "post_revoke_reingest"
-        session.flush()
-        return RevokePublishResult(
-            status="completed",
-            outcome="ok",
-            decision_id=None,
-        )
 
     def _fake_publish(session, config, task_id):
         calls.append("publish")
         return ms._PublishOutcome(kind="published")
 
-    monkeypatch.setattr(
-        "media_pilot.orchestration.revoke_publish.execute_revoke_publish",
-        _fake_revoke,
-    )
     monkeypatch.setattr(ms, "_quick_publish", _fake_publish)
 
     with session_factory() as session:
@@ -1060,7 +1045,8 @@ def test_manual_select_completed_task_revokes_before_republish(
         session.commit()
 
     assert result.status == "published", result.summary
-    assert calls == ["revoke:True", "publish"]
+    assert calls == ["publish"]
+    assert not (config.movies_dir / "Old Movie (2025)").exists()
 
 
 def test_manual_select_completed_task_with_missing_source_republishes_from_library_output(
