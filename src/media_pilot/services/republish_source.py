@@ -111,6 +111,17 @@ def _prepare_from_published_output(
 
     publish_path = Path(publish_dir)
     if not publish_path.exists() or not publish_path.is_dir():
+        trashed = _latest_trashed_input_path(session=session, task_id=task_id)
+        if trashed is not None:
+            return _prepare_from_existing_input(
+                session=session,
+                config=config,
+                task_id=task_id,
+                input_path=trashed,
+                staging_parent=publish_path.parent,
+                original_publish_dir=publish_path,
+                reason="trashed_input_recovery",
+            )
         return RepublishSourceResult(
             status="failure",
             summary=f"旧发布目录不存在，无法从已发布产物重新入库：{publish_path}",
@@ -265,6 +276,159 @@ def _prepare_bdmv_source(
     )
 
 
+def _prepare_from_existing_input(
+    *,
+    session: Session,
+    config: AppConfig,
+    task_id: str,
+    input_path: Path,
+    staging_parent: Path,
+    original_publish_dir: Path,
+    reason: str,
+) -> RepublishSourceResult:
+    from media_pilot.services.disc_input import resolve_bdmv_movie_source
+
+    if not input_path.exists():
+        return RepublishSourceResult(
+            status="failure",
+            summary=f"记录的回收区源文件不存在，无法重新入库：{input_path}",
+            data={"reason": "trashed_input_not_found"},
+        )
+    if resolve_bdmv_movie_source(input_path) is not None:
+        return _copy_existing_bdmv_input(
+            session=session,
+            task_id=task_id,
+            input_path=input_path,
+            staging_parent=staging_parent,
+            original_publish_dir=original_publish_dir,
+            reason=reason,
+        )
+    if input_path.is_file():
+        return _copy_existing_file_input(
+            session=session,
+            task_id=task_id,
+            input_path=input_path,
+            staging_parent=staging_parent,
+            original_publish_dir=original_publish_dir,
+            reason=reason,
+        )
+    return RepublishSourceResult(
+        status="failure",
+        summary=f"记录的回收区输入不是单文件或 BDMV 结构，无法重新入库：{input_path}",
+        data={"reason": "unsupported_trashed_input"},
+    )
+
+
+def _copy_existing_file_input(
+    *,
+    session: Session,
+    task_id: str,
+    input_path: Path,
+    staging_parent: Path,
+    original_publish_dir: Path,
+    reason: str,
+) -> RepublishSourceResult:
+    from media_pilot.repository.models import IngestTask
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
+
+    staging_dir = _republish_staging_dir_from_parent(staging_parent, task_id)
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staging_source = staging_dir / input_path.name
+    shutil.copy2(input_path, staging_source)
+    for subtitle in _same_stem_subtitles(input_path):
+        shutil.copy2(subtitle, staging_dir / subtitle.name)
+
+    task = session.get(IngestTask, task_id)
+    if task is not None:
+        task.source_path = str(staging_dir)
+    MediaSourceSelectionRepository(session).save(
+        task_id=task_id,
+        input_path=str(staging_dir),
+        selected_path=str(staging_source),
+        confidence=1.0,
+        reason="published_output_reselect",
+        payload={
+            "selection_source": "published_output_reselect",
+            "source_kind": "file",
+            "temporary": True,
+            "recovery_source": reason,
+            "original_publish_dir": str(original_publish_dir),
+            "original_source_path_missing": True,
+        },
+    )
+    session.flush()
+    return RepublishSourceResult(
+        status="prepared",
+        summary="已从回收区复制单文件主视频作为临时重入库来源",
+        data={"temporary_source": str(staging_dir), "source_kind": "file"},
+    )
+
+
+def _copy_existing_bdmv_input(
+    *,
+    session: Session,
+    task_id: str,
+    input_path: Path,
+    staging_parent: Path,
+    original_publish_dir: Path,
+    reason: str,
+) -> RepublishSourceResult:
+    from media_pilot.repository.models import IngestTask
+    from media_pilot.repository.repositories import MediaSourceSelectionRepository
+    from media_pilot.services.disc_input import resolve_bdmv_movie_source
+
+    bdmv_source = resolve_bdmv_movie_source(input_path)
+    if bdmv_source is None:
+        return RepublishSourceResult(
+            status="failure",
+            summary=f"记录的 BDMV 回收区输入不可用：{input_path}",
+            data={"reason": "trashed_bdmv_not_found"},
+        )
+    staging_dir = _republish_staging_dir_from_parent(staging_parent, task_id)
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(bdmv_source.bdmv_dir, staging_dir / "BDMV", dirs_exist_ok=True)
+    if bdmv_source.certificate_dir is not None:
+        shutil.copytree(
+            bdmv_source.certificate_dir,
+            staging_dir / "CERTIFICATE",
+            dirs_exist_ok=True,
+        )
+
+    task = session.get(IngestTask, task_id)
+    if task is not None:
+        task.source_path = str(staging_dir)
+    MediaSourceSelectionRepository(session).save(
+        task_id=task_id,
+        input_path=str(staging_dir),
+        selected_path=None,
+        confidence=1.0,
+        reason="published_output_reselect",
+        payload={
+            "selection_source": "published_output_reselect",
+            "source_kind": "bdmv",
+            "temporary": True,
+            "recovery_source": reason,
+            "bdmv_dir": str(staging_dir / "BDMV"),
+            "certificate_dir": (
+                str(staging_dir / "CERTIFICATE")
+                if (staging_dir / "CERTIFICATE").is_dir() else None
+            ),
+            "original_publish_dir": str(original_publish_dir),
+            "original_source_path_missing": True,
+        },
+    )
+    session.flush()
+    return RepublishSourceResult(
+        status="prepared",
+        summary="已从回收区复制 BDMV 结构作为临时重入库来源",
+        data={"temporary_source": str(staging_dir), "source_kind": "bdmv"},
+    )
+
+
 def _remove_publish_dir(publish_dir: str | None) -> None:
     if not publish_dir:
         return
@@ -279,6 +443,25 @@ def _remove_publish_dir(publish_dir: str | None) -> None:
 
 def _republish_staging_dir(publish_path: Path, task_id: str) -> Path:
     return publish_path.parent / ".media-pilot-staging" / task_id / "republish-source"
+
+
+def _republish_staging_dir_from_parent(parent: Path, task_id: str) -> Path:
+    return parent / ".media-pilot-staging" / task_id / "republish-source"
+
+
+def _latest_trashed_input_path(*, session: Session, task_id: str) -> Path | None:
+    from media_pilot.repository.models import OperationRecord
+
+    record = session.scalars(
+        select(OperationRecord)
+        .where(OperationRecord.task_id == task_id)
+        .where(OperationRecord.operation_type == "source_input_trashed")
+        .where(OperationRecord.status == "succeeded")
+        .order_by(OperationRecord.created_at.desc())
+    ).first()
+    if record is None or not record.target_path:
+        return None
+    return Path(record.target_path)
 
 
 def _is_within_library_root(config: AppConfig, path: Path) -> bool:

@@ -14,6 +14,7 @@ from media_pilot.repository.models import (
     FileAsset,
     IngestTask,
     MediaSourceSelection,
+    OperationRecord,
     WritePlan,
     WriteResult,
 )
@@ -204,6 +205,57 @@ def test_prepare_republish_source_uses_published_bdmv_when_original_source_missi
         assert selection.payload["source_kind"] == "bdmv"
         assert Path(selection.payload["bdmv_dir"]).joinpath("index.bdmv").exists()
         assert Path(selection.payload["certificate_dir"]).joinpath("id.bdmv").exists()
+
+
+def test_prepare_republish_source_recovers_from_trash_when_publish_dir_was_already_removed(
+    tmp_path: Path,
+) -> None:
+    """旧 bug 可能先删发布目录再因 FK 失败; 此时应回退使用回收区源文件。"""
+    from sqlalchemy import select
+
+    from media_pilot.services.republish_source import prepare_republish_source
+
+    config = _make_config(tmp_path)
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+    task_id = _create_published_file_task(session_factory, config=config)
+
+    publish_dir = config.movies_dir / "Published Movie (2026)"
+    trashed = tmp_path / "trash" / "Published Movie.mkv"
+    trashed.parent.mkdir(parents=True)
+    trashed.write_bytes(b"from trash")
+    with session_factory() as session:
+        session.add(OperationRecord(
+            task_id=task_id,
+            operation_type="source_input_trashed",
+            permission_level="write",
+            source_path=str(config.downloads_dir / "missing.mkv"),
+            target_path=str(trashed),
+            status="succeeded",
+            details={"policy": "trash"},
+        ))
+        session.commit()
+    import shutil
+
+    shutil.rmtree(publish_dir)
+
+    with session_factory() as session:
+        result = prepare_republish_source(session=session, config=config, task_id=task_id)
+        session.commit()
+
+    assert result.ok, result.summary
+    with session_factory() as session:
+        task = session.get(IngestTask, task_id)
+        assert task is not None
+        assert task.source_path.endswith("/republish-source")
+        selection = session.scalars(
+            select(MediaSourceSelection)
+            .where(MediaSourceSelection.task_id == task_id)
+            .order_by(MediaSourceSelection.created_at.desc())
+        ).first()
+        assert selection is not None
+        assert selection.payload["recovery_source"] == "trashed_input_recovery"
+        assert Path(selection.selected_path).read_bytes() == b"from trash"
 
 
 def test_revoke_publish_tool_skip_prepares_republish_source_instead_of_deleting_task(
