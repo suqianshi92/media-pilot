@@ -69,6 +69,7 @@ _DECISION_REPLY_SUCCESS_STATUSES = frozenset({
     "source_cleanup_kept",
     "source_cleanup_trashed",
     "manual_selection_cancelled",
+    "manual_selection_published",
     # select_metadata_candidate 走确定性 fetch + publish 路径成功后,
     # task.status=library_import_complete / run.status=completed. 该
     # AgentRunResult.status 必须视为 reply success, 否则 envelope 误标

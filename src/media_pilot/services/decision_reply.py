@@ -367,8 +367,8 @@ def reply_to_decision(
                 error_message=publish_result.summary,
             )
 
-    # ── manual_selection_blocked: cancel 是确定性取消; retry / free_text
-    #    仍走普通 Agent 续跑, 落到下方的"normal decision"分支。
+    # ── manual_selection_blocked: cancel / retry 都是确定性后端路径。
+    # retry 重新检查门禁并执行快捷发布, 不让 LLM 猜 task_id。
     if is_manual_blocked and reply.option_id == "cancel":
         from media_pilot.services.manual_selection import (
             handle_manual_selection_cancel,
@@ -380,6 +380,26 @@ def reply_to_decision(
             status="manual_selection_cancelled",
             message_count=1,
             tool_call_count=0,
+        )
+
+    if is_manual_blocked and reply.option_id == "retry":
+        from media_pilot.services.manual_selection import (
+            handle_manual_selection_retry,
+        )
+
+        result = handle_manual_selection_retry(
+            session=session, config=config, decision=decision,
+        )
+        return AgentRunResult(
+            run_id=decision.run_id,
+            status=(
+                "manual_selection_published"
+                if result.status == "published"
+                else result.status
+            ),
+            message_count=1,
+            tool_call_count=0,
+            error_message=result.summary if result.status == "agent_failed" else None,
         )
 
     # ── select_metadata_candidate: 写入 user_decision MediaCandidate

@@ -587,6 +587,122 @@ def handle_manual_selection_cancel(
     }
 
 
+def handle_manual_selection_retry(
+    *,
+    session: Session,
+    config: AppConfig,
+    decision,
+) -> ManualSelectResult:
+    """重试 manual_selection_blocked 的确定性发布路径, 不调用 LLM。"""
+    from media_pilot.repository.repositories import IngestTaskRepository
+    from media_pilot.services.auto_ingest import check_eligibility
+
+    task_repo = IngestTaskRepository(session)
+    task = task_repo.get(decision.task_id)
+    if task is None:
+        return ManualSelectResult(status="agent_failed", summary="任务不存在")
+
+    task_repo.update_status(
+        task,
+        status="processing",
+        current_step="manual_selection_retry",
+        failure_reason=None,
+    )
+
+    eligibility = check_eligibility(
+        session=session,
+        config=config,
+        task_id=decision.task_id,
+    )
+    non_metadata_blockers = [
+        r for r in eligibility.blocking_reasons
+        if r not in ("no_metadata_candidates", "no_clear_metadata_winner")
+    ]
+    if non_metadata_blockers:
+        decision_id = _create_blocked_decision(
+            session,
+            decision.task_id,
+            eligibility,
+            blocking_reasons=non_metadata_blockers,
+        )
+        _write_system_message(
+            session,
+            decision.task_id,
+            "[SystemAction] 已重试手动选择后的发布，但仍被门禁阻塞："
+            f"{non_metadata_blockers}",
+        )
+        return ManualSelectResult(
+            status="waiting_user",
+            summary=f"重试后仍需用户处理：{non_metadata_blockers}",
+            decision_id=decision_id,
+            blocking_reasons=list(eligibility.blocking_reasons),
+        )
+
+    outcome = _quick_publish(session, config, decision.task_id)
+    if outcome.kind == "published":
+        if _cleanup_published_output_reselect_source(session, decision.task_id):
+            cleanup_result = _skipped_cleanup_result(
+                "Published-output reselect source was temporary and has been removed.",
+            )
+        else:
+            cleanup_result = _run_manual_post_publish_cleanup(
+                session=session, config=config, task_id=decision.task_id,
+            )
+        _write_system_message(
+            session,
+            decision.task_id,
+            "[SystemAction] 已重试手动选择后的发布，系统已自动完成入库。",
+        )
+        if not cleanup_result.decision_requested:
+            _complete_manual_selection_run(session, decision.task_id)
+        return ManualSelectResult(status="published", summary="重试发布已完成")
+
+    if outcome.kind == "target_conflict":
+        decision_id = outcome.decision_id or _create_target_conflict_decision(
+            session,
+            decision.task_id,
+            outcome,
+            title=task.title or "Unknown",
+            year=task.year,
+            provider="manual",
+        )
+        _write_system_message(
+            session,
+            decision.task_id,
+            "[SystemAction] 已重试手动选择后的发布，但目标路径被占用，等待用户决策。",
+        )
+        return ManualSelectResult(
+            status="waiting_user",
+            summary="目标路径被占用，等待用户决策",
+            decision_id=decision_id,
+        )
+
+    from media_pilot.repository.repositories import AgentRunRepository
+    run = AgentRunRepository(session).get(decision.run_id)
+    if run is not None:
+        AgentRunRepository(session).update_status(
+            run,
+            status="failed",
+            current_step="manual_selection_retry_failed",
+            error_message=outcome.reason,
+        )
+    task_repo.update_status(
+        task,
+        status="agent_failed",
+        current_step="manual_selection_retry_failed",
+        failure_reason=outcome.reason,
+    )
+    _write_system_message(
+        session,
+        decision.task_id,
+        f"[SystemAction] 已重试手动选择后的发布，但发布失败：{outcome.reason}",
+    )
+    return ManualSelectResult(
+        status="agent_failed",
+        summary=f"重试发布失败：{outcome.reason}",
+    )
+
+
 def _ensure_manual_select_run(session: Session, task_id: str):
     """为 manual select 场景确保任务有 active AgentRun。
 

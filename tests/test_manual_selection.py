@@ -696,52 +696,24 @@ def test_manual_selection_blocked_cancel_deterministic_no_llm(
         assert task.failure_reason == MANUAL_SELECTION_CANCEL_FAILURE_REASON
 
 
-# ── 4d. manual_selection_blocked retry 仍继续普通 Agent 续跑 ─────
+# ── 4d. manual_selection_blocked retry 走确定性发布 ───────────────
 
 
-def test_manual_selection_blocked_retry_continues_normal_agent_path(
+def test_manual_selection_blocked_retry_publishes_without_llm(
     tmp_path: Path, monkeypatch, stub_dependencies
 ) -> None:
-    """manual_selection_blocked + retry 必须走普通 Agent 续跑:
-    - 不会被 cancel handler 截断, 落到 continue_agent_run。
-    - 任务和 run 切到 active / agent_running, 不进 agent_failed。
-    """
+    """manual_selection_blocked + retry 必须重跑确定性快捷发布, 不调用 LLM。"""
     from media_pilot.services import auto_ingest
     from media_pilot.services.auto_ingest import EligibilityResult
     from media_pilot.services.decision_reply import ReplyInput, reply_to_decision
     from media_pilot.services.manual_selection import submit_manual_selection
 
     from media_pilot.agent import runner as runner_mod
-    from media_pilot.agent.runner import AgentRunResult
 
-    continue_called = {"n": 0, "run_id": ""}
+    def _block_continue_agent_run(**kwargs):
+        raise AssertionError("manual_selection_blocked retry must not call LLM")
 
-    def _fake_continue_agent_run(**kwargs):
-        continue_called["n"] += 1
-        continue_called["run_id"] = kwargs.get("run_id", "")
-        # 模拟 continue 成功, 把 task/run 切到 active/agent_running
-        from media_pilot.repository.repositories import (
-            AgentRunRepository,
-            IngestTaskRepository,
-        )
-
-        session = kwargs["session"]
-        run_repo = AgentRunRepository(session)
-        run = run_repo.get(kwargs.get("run_id", ""))
-        if run is not None:
-            run_repo.update_status(
-                run, status="active", current_step="user_replied",
-            )
-        task_repo = IngestTaskRepository(session)
-        task = task_repo.get(kwargs.get("task_id", "")) or run.task_id if run else None
-        return AgentRunResult(
-            run_id=continue_called["run_id"],
-            status="agent_completed",
-            message_count=1,
-            tool_call_count=0,
-        )
-
-    monkeypatch.setattr(runner_mod, "continue_agent_run", _fake_continue_agent_run)
+    monkeypatch.setattr(runner_mod, "continue_agent_run", _block_continue_agent_run)
 
     config = _make_config(tmp_path)
     initialize_database(config)
@@ -774,7 +746,9 @@ def test_manual_selection_blocked_retry_continues_normal_agent_path(
         session.commit()
 
     decision_id = result.decision_id
+    assert decision_id
 
+    _stub_ok_eligibility_and_images(monkeypatch, auto_ingest)
     with session_factory() as session:
         run_result = reply_to_decision(
             session=session,
@@ -783,16 +757,11 @@ def test_manual_selection_blocked_retry_continues_normal_agent_path(
         )
         session.commit()
 
-    # retry 必须走到 continue_agent_run, 不会被 cancel handler 截断
-    assert continue_called["n"] == 1, (
-        f"retry 必须调用 continue_agent_run 1 次, 实际 {continue_called['n']}"
-    )
-    assert continue_called["run_id"], "continue_agent_run 必须拿到 run_id"
-    assert run_result.status == "agent_completed", (
+    assert run_result.status == "manual_selection_published", (
         f"run_result.status={run_result.status}"
     )
 
-    # DB 终态: run 是 active (continue_agent_run 内部维护), task 不应是 agent_failed
+    # DB 终态: 发布完成, run 收口, task 不再卡在 agent_running。
     with session_factory() as session:
         decision = session.get(AgentDecisionRequest, decision_id)
         assert decision is not None
@@ -800,15 +769,13 @@ def test_manual_selection_blocked_retry_continues_normal_agent_path(
 
         run = session.get(AgentRun, decision.run_id)
         assert run is not None
-        assert run.status != "failed", (
-            f"retry 路径下 run.status={run.status}, 不应为 failed"
-        )
+        assert run.status == "completed"
+        assert run.current_step == "manual_metadata_published"
 
         task = session.get(IngestTask, task_id)
         assert task is not None
-        assert task.status != "agent_failed", (
-            f"retry 路径下 task.status={task.status}, 不应为 agent_failed"
-        )
+        assert task.status == "library_import_complete"
+        assert task.current_step == "library_import_complete"
 
 
 # ── 4. early-return path on candidate persist failure ──────────────────
