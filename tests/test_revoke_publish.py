@@ -9,6 +9,13 @@ from media_pilot.app import create_app
 from media_pilot.config import AppConfig
 from media_pilot.repository.database import create_session_factory, initialize_database
 from media_pilot.repository.models import (
+    AdapterCall,
+    AgentDecisionRequest,
+    AgentMessage,
+    AgentRun,
+    AgentToolCall,
+    DownloadTask,
+    EpisodeMapping,
     FileAsset,
     IngestTask,
     MediaCandidate,
@@ -594,6 +601,121 @@ def test_revoke_delete_task_data_removes_write_plan_before_task(tmp_path: Path):
         assert session.scalars(
             select(WP).where(WP.task_id == task_id)
         ).first() is None
+
+
+def test_revoke_delete_task_data_removes_all_task_foreign_keys_before_task(tmp_path: Path):
+    """源文件缺失撤销删除任务数据时, 必须先处理所有 task_id 外键残留。"""
+    from media_pilot.orchestration.revoke_publish import execute_revoke_publish
+
+    publish_dir = str(tmp_path / "library" / "movies" / "Published Movie (2026)")
+    missing_source = tmp_path / "downloads" / "missing.mkv"
+    Path(publish_dir).mkdir(parents=True, exist_ok=True)
+    Path(publish_dir).joinpath("Published Movie (2026).mkv").write_bytes(b"movie")
+
+    config = AppConfig(
+        downloads_dir=missing_source.parent,
+        watch_dir=tmp_path / "watch",
+        workspace_dir=tmp_path / "workspace",
+        movies_dir=tmp_path / "library" / "movies",
+        shows_dir=tmp_path / "library" / "shows",
+        database_dir=tmp_path / "db",
+        tmdb_api_key="test-key",
+    )
+    for d in (config.downloads_dir, config.workspace_dir, config.movies_dir, config.shows_dir, config.database_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    initialize_database(config)
+    session_factory = create_session_factory(config)
+
+    with session_factory() as session:
+        task = IngestTaskRepository(session).create(IngestTaskCreate(
+            source_path=str(missing_source),
+            status="library_import_complete",
+            current_step="library_import_complete",
+        ))
+        session.add(MediaSourceSelection(
+            task_id=task.id,
+            input_path=str(missing_source),
+            selected_path=str(missing_source),
+            payload={},
+        ))
+        session.add(WriteResult(
+            task_id=task.id,
+            status="succeeded",
+            payload={"target_dir": publish_dir},
+        ))
+        session.add(AdapterCall(
+            task_id=task.id,
+            adapter_name="tpdb",
+            action="search_movie",
+            request_summary={"keyword": "Published Movie"},
+            response_summary={"count": 0},
+            status="succeeded",
+        ))
+        session.add(EpisodeMapping(
+            task_id=task.id,
+            file_path=str(missing_source),
+            season=1,
+            episode=1,
+            source="filename",
+            payload={},
+        ))
+        download = DownloadTask(
+            title="Published Movie",
+            source="manual",
+            save_path=str(missing_source.parent),
+            status="completed",
+            ingest_task_id=task.id,
+        )
+        session.add(download)
+        run = AgentRun(task_id=task.id, status="completed")
+        session.add(run)
+        session.flush()
+        message = AgentMessage(
+            run_id=run.id,
+            role="assistant",
+            content="done",
+            tool_calls=None,
+        )
+        session.add(message)
+        session.flush()
+        session.add(AgentToolCall(
+            run_id=run.id,
+            message_id=message.id,
+            tool_name="get_task_context",
+            input={},
+            output={},
+            status="completed",
+        ))
+        session.add(AgentDecisionRequest(
+            run_id=run.id,
+            task_id=task.id,
+            decision_type="post_revoke_action",
+            status="pending",
+            question="next?",
+            free_text_allowed=False,
+            options=[],
+        ))
+        session.commit()
+        task_id = task.id
+        download_id = download.id
+
+    with session_factory() as session:
+        result = execute_revoke_publish(session, task_id=task_id)
+        assert result.status == "deleted"
+
+    with session_factory() as session:
+        assert session.get(IngestTask, task_id) is None
+        assert session.scalars(
+            select(AdapterCall).where(AdapterCall.task_id == task_id)
+        ).first() is None
+        assert session.scalars(
+            select(EpisodeMapping).where(EpisodeMapping.task_id == task_id)
+        ).first() is None
+        assert session.scalars(
+            select(AgentRun).where(AgentRun.task_id == task_id)
+        ).first() is None
+        assert session.get(DownloadTask, download_id).ingest_task_id is None
 
 
 def test_execute_revoke_skip_sets_processing_status(tmp_path: Path):

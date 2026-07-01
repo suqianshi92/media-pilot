@@ -13,8 +13,13 @@ from media_pilot.config.settings import AppConfig
 from media_pilot.orchestration.db_retry import safe_commit
 from media_pilot.repository.models import (
     AdapterCall,
+    AgentDecisionRequest,
+    AgentMessage,
+    AgentRun,
+    AgentToolCall,
     AuditLog,
     DownloadTask,
+    EpisodeMapping,
     FileAsset,
     IngestTask,
     MediaCandidate,
@@ -355,14 +360,33 @@ def execute_delete_input(
 
 def _cascade_delete_ingest_task(session: Session, task_id: str) -> None:
     """删除入库任务及其所有关联数据（含审计记录）。"""
+    run_ids = select(AgentRun.id).where(AgentRun.task_id == task_id)
+    session.execute(
+        delete(AgentToolCall).where(AgentToolCall.run_id.in_(run_ids))
+    )
+    session.execute(
+        delete(AgentDecisionRequest).where(AgentDecisionRequest.run_id.in_(run_ids))
+    )
+    session.execute(
+        delete(AgentMessage).where(AgentMessage.run_id.in_(run_ids))
+    )
+    session.execute(delete(AgentRun).where(AgentRun.task_id == task_id))
+    session.execute(
+        update(DownloadTask)
+        .where(DownloadTask.ingest_task_id == task_id)
+        .values(ingest_task_id=None)
+    )
+
     tables_in_order = [
         (AuditLog, AuditLog.task_id),
         (OperationRecord, OperationRecord.task_id),
         (AdapterCall, AdapterCall.task_id),
         (FileAsset, FileAsset.task_id),
         (WriteResult, WriteResult.task_id),
+        (WritePlan, WritePlan.task_id),
         (MetadataDetail, MetadataDetail.task_id),
         (SearchKeywordRecord, SearchKeywordRecord.task_id),
+        (EpisodeMapping, EpisodeMapping.task_id),
         (MediaSourceSelection, MediaSourceSelection.task_id),
         (MediaCandidate, MediaCandidate.task_id),
     ]

@@ -8,7 +8,14 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from media_pilot.repository.models import (
+    AdapterCall,
+    AgentDecisionRequest,
+    AgentMessage,
+    AgentRun,
+    AgentToolCall,
     AuditLog,
+    DownloadTask,
+    EpisodeMapping,
     FileAsset,
     IngestTask,
     MediaCandidate,
@@ -296,7 +303,24 @@ def _ensure_agent_run_for_decision(session: Session, task_id: str):
 
 def _delete_task_data(session: Session, task_id: str) -> None:
     """删除任务关联的业务数据（保留 IngestTask 主记录由调用方决定）。"""
-    # 按依赖顺序删除：先删外键引用方，再删主表
+    # 按依赖顺序删除：先删外键引用方，再删主表。
+    run_ids = select(AgentRun.id).where(AgentRun.task_id == task_id)
+    session.execute(
+        delete(AgentToolCall).where(AgentToolCall.run_id.in_(run_ids))
+    )
+    session.execute(
+        delete(AgentDecisionRequest).where(AgentDecisionRequest.run_id.in_(run_ids))
+    )
+    session.execute(
+        delete(AgentMessage).where(AgentMessage.run_id.in_(run_ids))
+    )
+    session.execute(delete(AgentRun).where(AgentRun.task_id == task_id))
+    session.execute(
+        update(DownloadTask)
+        .where(DownloadTask.ingest_task_id == task_id)
+        .values(ingest_task_id=None)
+    )
+
     tables_in_order = [
         (AuditLog, AuditLog.task_id),
         (OperationRecord, OperationRecord.task_id),
@@ -305,6 +329,8 @@ def _delete_task_data(session: Session, task_id: str) -> None:
         (WritePlan, WritePlan.task_id),
         (MetadataDetail, MetadataDetail.task_id),
         (SearchKeywordRecord, SearchKeywordRecord.task_id),
+        (AdapterCall, AdapterCall.task_id),
+        (EpisodeMapping, EpisodeMapping.task_id),
         (MediaSourceSelection, MediaSourceSelection.task_id),
         (MediaCandidate, MediaCandidate.task_id),
     ]
