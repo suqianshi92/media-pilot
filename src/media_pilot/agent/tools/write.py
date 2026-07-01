@@ -621,9 +621,14 @@ def _create_metadata_unavailable_decision(
                     "description": "让 Agent 继续尝试其它关键词或候选。",
                 },
                 {
-                    "id": "publish_without_metadata",
-                    "label": "无元数据入库",
-                    "description": "只发布已确认的媒体内容，不生成 NFO 或图片。",
+                    "id": "publish_without_metadata_movie",
+                    "label": "无元数据入库到普通电影库",
+                    "description": "只发布已确认的媒体内容到普通电影库，不生成 NFO 或图片。",
+                },
+                {
+                    "id": "publish_without_metadata_adult",
+                    "label": "无元数据入库到成人影片库",
+                    "description": "只发布已确认的媒体内容到成人影片库，不生成 NFO 或图片。",
                 },
                 {
                     "id": "cancel",
@@ -656,6 +661,7 @@ _PUBLISH_WITHOUT_METADATA_SCHEMA = {
     "type": "object",
     "properties": {
         "task_id": {"type": "string"},
+        "library_target": {"type": "string", "enum": ["movie", "adult"]},
     },
     "required": ["task_id"],
     "additionalProperties": False,
@@ -670,6 +676,7 @@ def _handle_publish_without_metadata(context: ToolContext, input_data: dict) -> 
     result = publish_without_metadata(
         session=context.session, config=context.config, task_id=task_id,
         allow_agent_running=True,
+        library_target=input_data.get("library_target"),
     )
     if result.status != "published":
         return ToolResult(

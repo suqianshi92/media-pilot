@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ export interface ConfirmDialogProps {
   description: string
   confirmLabel?: string
   cancelLabel?: string
+  children?: ReactNode
   variant?: 'default' | 'destructive'
   loading?: boolean
   onConfirm: () => void
@@ -21,6 +22,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = '确认',
   cancelLabel = '取消',
+  children,
   variant = 'default',
   loading = false,
   onConfirm,
@@ -52,6 +54,7 @@ export function ConfirmDialog({
       >
         <h3 className="text-lg font-semibold text-surface-foreground">{title}</h3>
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        {children ? <div className="mt-4">{children}</div> : null}
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={onCancel} disabled={loading}>
             {cancelLabel}

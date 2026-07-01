@@ -187,6 +187,7 @@ def _handle_overwrite_no_metadata_target(
     result = publish_without_metadata(
         session=session, config=config, task_id=task_id, force_overwrite=True,
         allow_agent_running=True,
+        library_target=(decision.payload or {}).get("library_target"),
     )
     if result.status != "published":
         raise ValueError({

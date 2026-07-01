@@ -222,6 +222,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const [searchError, setSearchError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ title: string; description: string; variant: 'success' | 'warning' | 'error' } | null>(null)
   const [showNoMetadataConfirm, setShowNoMetadataConfirm] = useState(false)
+  const [noMetadataLibraryTarget, setNoMetadataLibraryTarget] = useState<'movie' | 'adult'>('movie')
 
   useEffect(() => {
     setKeyword(detail.search_keyword?.keyword ?? '')
@@ -231,6 +232,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
     setSearchError(null)
     setFeedback(null)
     setShowNoMetadataConfirm(false)
+    setNoMetadataLibraryTarget('movie')
   }, [detail.task.id, detail.search_keyword?.keyword])
 
   const handleScopeLabel = (value: ResearchScope): string => {
@@ -328,7 +330,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   })
 
   const publishWithoutMetadataMutation = useMutation({
-    mutationFn: () => service.publishWithoutMetadata(taskId),
+    mutationFn: () => service.publishWithoutMetadata(taskId, noMetadataLibraryTarget),
     onMutate: () => {
       setFeedback({
         variant: 'warning',
@@ -466,7 +468,51 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
         onCancel={() => {
           if (!publishWithoutMetadataMutation.isPending) setShowNoMetadataConfirm(false)
         }}
-      />
+      >
+        <div className="grid gap-2">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t('taskWorkspace.noMetadataLibraryTarget')}
+          </p>
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
+            <input
+              type="radio"
+              name="no-metadata-library-target"
+              value="movie"
+              checked={noMetadataLibraryTarget === 'movie'}
+              disabled={publishWithoutMetadataMutation.isPending}
+              onChange={() => setNoMetadataLibraryTarget('movie')}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-medium text-surface-foreground">
+                {t('taskWorkspace.noMetadataLibraryTargetMovie')}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t('taskWorkspace.noMetadataLibraryTargetMovieDesc')}
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
+            <input
+              type="radio"
+              name="no-metadata-library-target"
+              value="adult"
+              checked={noMetadataLibraryTarget === 'adult'}
+              disabled={publishWithoutMetadataMutation.isPending}
+              onChange={() => setNoMetadataLibraryTarget('adult')}
+              className="mt-1"
+            />
+            <span>
+              <span className="block font-medium text-surface-foreground">
+                {t('taskWorkspace.noMetadataLibraryTargetAdult')}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t('taskWorkspace.noMetadataLibraryTargetAdultDesc')}
+              </span>
+            </span>
+          </label>
+        </div>
+      </ConfirmDialog>
 
       <p className="text-xs text-muted-foreground">
         {t('taskWorkspace.searchScope')}：{handleScopeLabel(scope)}

@@ -267,7 +267,11 @@ def reply_to_decision(
                 tool_call_count=0,
             )
 
-        if reply.option_id == "publish_without_metadata":
+        if reply.option_id in {
+            "publish_without_metadata",
+            "publish_without_metadata_movie",
+            "publish_without_metadata_adult",
+        }:
             from media_pilot.repository.repositories import (
                 AgentDecisionRequestCreate,
             )
@@ -283,6 +287,7 @@ def reply_to_decision(
             publish_result = publish_without_metadata(
                 session=session, config=config, task_id=decision.task_id,
                 allow_agent_running=True,
+                library_target=_metadata_unavailable_library_target(reply.option_id),
             )
             if publish_result.status == "published":
                 cleanup = run_post_publish_source_cleanup(
@@ -332,6 +337,7 @@ def reply_to_decision(
                         "final_target_file": publish_result.final_target_file,
                         "conflict": "no_metadata_target_conflict",
                         "publish_mode": "no_metadata",
+                        "library_target": _metadata_unavailable_library_target(reply.option_id),
                     },
                 ))
                 task_repo.update_status(
@@ -740,6 +746,14 @@ def _extract_option_label(opt: dict, decision_type: str) -> str:
     return ""
 
 
+def _metadata_unavailable_library_target(option_id: str | None) -> str | None:
+    if option_id == "publish_without_metadata_movie":
+        return "movie"
+    if option_id == "publish_without_metadata_adult":
+        return "adult"
+    return None
+
+
 def _summarize(decision_type: str, option_id: str | None, label: str) -> str:
     """按 decision_type 生成最终系统动作摘要. label 为空时用通用 fallback."""
     if decision_type == "select_metadata_candidate":
@@ -771,6 +785,10 @@ def _summarize(decision_type: str, option_id: str | None, label: str) -> str:
     if decision_type == "metadata_unavailable_action":
         if option_id == "continue_search":
             return "[SystemAction] 已选择继续搜索元数据"
+        if option_id == "publish_without_metadata_movie":
+            return "[SystemAction] 已确认按无元数据方式入库到普通电影库"
+        if option_id == "publish_without_metadata_adult":
+            return "[SystemAction] 已确认按无元数据方式入库到成人影片库"
         if option_id == "publish_without_metadata":
             return "[SystemAction] 已确认按无元数据方式入库"
         if option_id == "cancel":

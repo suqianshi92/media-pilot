@@ -166,7 +166,7 @@ def test_metadata_unavailable_publish_without_metadata_publishes_deterministical
             question="未找到元数据，请选择处理方式。",
             options=[
                 {"id": "continue_search", "label": "继续搜索"},
-                {"id": "publish_without_metadata", "label": "无元数据入库"},
+                {"id": "publish_without_metadata_movie", "label": "无元数据入库到普通电影库"},
                 {"id": "cancel", "label": "取消"},
             ],
         )
@@ -174,7 +174,7 @@ def test_metadata_unavailable_publish_without_metadata_publishes_deterministical
         result = reply_to_decision(
             session=session,
             config=config,
-            reply=ReplyInput(decision_id=decision.id, option_id="publish_without_metadata"),
+            reply=ReplyInput(decision_id=decision.id, option_id="publish_without_metadata_movie"),
         )
         session.commit()
 

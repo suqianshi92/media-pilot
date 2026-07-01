@@ -44,7 +44,7 @@ def test_publish_file_without_metadata_copies_video_and_same_stem_subtitle(tmp_p
             media_type="movie",
         ))
         result = publish_without_metadata(
-            session=session, config=config, task_id=task.id,
+            session=session, config=config, task_id=task.id, library_target="movie",
         )
         session.commit()
 
@@ -85,7 +85,7 @@ def test_publish_bdmv_without_metadata_copies_disc_directory_only(tmp_path: Path
             media_type="movie",
         ))
         result = publish_without_metadata(
-            session=session, config=config, task_id=task.id,
+            session=session, config=config, task_id=task.id, library_target="movie",
         )
         session.commit()
 
@@ -129,6 +129,7 @@ def test_agent_running_rejected_by_default_but_allowed_for_agent_internal_path(
             config=config,
             task_id=task.id,
             allow_agent_running=True,
+            library_target="movie",
         )
         session.commit()
 
@@ -137,3 +138,66 @@ def test_agent_running_rejected_by_default_but_allowed_for_agent_internal_path(
         assert task_after is not None
         assert task_after.status == "library_import_complete"
         assert task_after.metadata_status == "none"
+
+
+def test_publish_without_metadata_to_adult_library_when_explicitly_selected(
+    tmp_path: Path,
+) -> None:
+    adult_dir = tmp_path / "library" / "adult"
+    config = AppConfig(
+        downloads_dir=tmp_path / "downloads",
+        watch_dir=tmp_path / "watch",
+        workspace_dir=tmp_path / "workspace",
+        movies_dir=tmp_path / "library" / "movies",
+        shows_dir=tmp_path / "library" / "shows",
+        database_dir=tmp_path / "db",
+        adult_movies_dir=adult_dir,
+        llm_api_key="test-key",
+        llm_base_url="https://example.test/v1",
+        llm_model="test-model",
+        tmdb_api_key="tmdb-key",
+        tpdb_api_key="tpdb-key",
+    )
+    config.watch_dir.mkdir(parents=True)
+    source = config.watch_dir / "HMN-887.mp4"
+    source.write_bytes(b"adult-video")
+
+    sf = _session_factory(config)
+    with sf() as session:
+        task = IngestTaskRepository(session).create(IngestTaskCreate(
+            source_path=str(source),
+            status="waiting_user",
+            current_step="metadata_unavailable_action",
+            media_type="movie",
+        ))
+        result = publish_without_metadata(
+            session=session, config=config, task_id=task.id, library_target="adult",
+        )
+        session.commit()
+
+        assert result.status == "published"
+        assert (adult_dir / "HMN-887" / "HMN-887.mp4").read_bytes() == b"adult-video"
+        assert not (config.movies_dir / "HMN-887").exists()
+
+
+def test_publish_without_metadata_requires_target_without_provider_hint(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(tmp_path)
+    config.watch_dir.mkdir(parents=True)
+    source = config.watch_dir / "Unknown.Movie.mkv"
+    source.write_bytes(b"video")
+
+    sf = _session_factory(config)
+    with sf() as session:
+        task = IngestTaskRepository(session).create(IngestTaskCreate(
+            source_path=str(source),
+            status="waiting_user",
+            current_step="metadata_unavailable_action",
+            media_type="movie",
+        ))
+
+        result = publish_without_metadata(session=session, config=config, task_id=task.id)
+
+        assert result.status == "rejected"
+        assert result.blocking_reasons == ["library_target_required"]

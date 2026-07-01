@@ -1033,7 +1033,7 @@ export function createMockTaskService(): TaskService {
       })
     },
 
-    async publishWithoutMetadata(taskId: string) {
+    async publishWithoutMetadata(taskId: string, libraryTarget: 'movie' | 'adult') {
       const task = findTaskOrThrow(state, taskId)
       updateTaskSummary(task, (summary) => {
         summary.metadata_status = 'none'
@@ -1047,8 +1047,12 @@ export function createMockTaskService(): TaskService {
       return createSuccessEnvelope({
         status: 'published',
         metadata_status: 'none' as const,
-        final_target_dir: '/data/library/mock-no-metadata',
-        final_target_file: '/data/library/mock-no-metadata/mock.mkv',
+        final_target_dir: libraryTarget === 'adult'
+          ? '/data/library/adult/mock-no-metadata'
+          : '/data/library/mock-no-metadata',
+        final_target_file: libraryTarget === 'adult'
+          ? '/data/library/adult/mock-no-metadata/mock.mkv'
+          : '/data/library/mock-no-metadata/mock.mkv',
         cleanup_decision_requested: false,
         decision_id: null,
       })

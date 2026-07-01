@@ -1363,8 +1363,12 @@ def publish_task_without_metadata(task_id: str, body: dict, request: Request) ->
                 current_step="no_metadata_publish",
             ))
 
+        library_target = body.get("library_target")
         result = publish_without_metadata(
-            session=session, config=config, task_id=task_id,
+            session=session,
+            config=config,
+            task_id=task_id,
+            library_target=library_target,
         )
         if result.status == "target_conflict":
             try:
@@ -1389,6 +1393,7 @@ def publish_task_without_metadata(task_id: str, body: dict, request: Request) ->
                         ],
                         payload={
                             "publish_mode": "no_metadata",
+                            "library_target": library_target,
                             "final_target_dir": result.final_target_dir,
                             "final_target_file": result.final_target_file,
                             "conflict": "no_metadata_target_conflict",

@@ -352,7 +352,7 @@ export function createApiTaskService() {
       return apiPost<ApiEnvelope<ManualSelectResponse>>(`/tasks/${taskId}/manual-select`, params)
     },
 
-    async publishWithoutMetadata(taskId: string): Promise<ApiEnvelope<{
+    async publishWithoutMetadata(taskId: string, libraryTarget: 'movie' | 'adult'): Promise<ApiEnvelope<{
       status: string
       metadata_status: 'unknown' | 'complete' | 'none'
       final_target_dir?: string | null
@@ -367,7 +367,10 @@ export function createApiTaskService() {
         final_target_file?: string | null
         cleanup_decision_requested?: boolean
         decision_id?: string | null
-      }>>(`/tasks/${taskId}/publish-without-metadata`, { confirmed: true })
+      }>>(`/tasks/${taskId}/publish-without-metadata`, {
+        confirmed: true,
+        library_target: libraryTarget,
+      })
     },
 
     // ── 删除任务输入 ──

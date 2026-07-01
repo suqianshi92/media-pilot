@@ -50,6 +50,7 @@ def publish_without_metadata(
     task_id: str,
     force_overwrite: bool = False,
     allow_agent_running: bool = False,
+    library_target: str | None = None,
 ) -> NoMetadataPublishResult:
     """把已确认发布对象以无元数据方式发布到电影库.
 
@@ -93,9 +94,21 @@ def publish_without_metadata(
             blocking_reasons=["unsupported_source_kind"],
         )
 
-    library_root = resolve_library_root(
-        config, media_type="movie", provider=_provider_hint_for_task(task),
-    )
+    try:
+        library_root = _resolve_no_metadata_library_root(
+            config, task=task, library_target=library_target,
+        )
+    except ValueError as exc:
+        reason = (
+            "library_target_required"
+            if "library_target is required" in str(exc)
+            else "invalid_library_target"
+        )
+        return NoMetadataPublishResult(
+            status="rejected",
+            summary=str(exc),
+            blocking_reasons=[reason],
+        )
     plan = build_no_metadata_plan(
         library_root=library_root,
         source_path=source_path,
@@ -407,3 +420,28 @@ def _provider_hint_for_task(task) -> str | None:
     if task.preselected_metadata_profile == "tpdb_adult_movie":
         return "tpdb"
     return None
+
+
+def _resolve_no_metadata_library_root(
+    config: AppConfig, *, task, library_target: str | None,
+) -> Path:
+    """解析无元数据入库目标库。
+
+    无元数据任务没有可靠 provider 事实，不能静默把未知电影放进普通电影库。
+    UI/API 显式选择 ``movie`` / ``adult`` 时按选择路由；Agent 决策路径可
+    继续消费任务已有的 preselected provider/profile hint。
+    """
+    if library_target == "movie":
+        return resolve_library_root(config, media_type="movie", provider="tmdb")
+    if library_target == "adult":
+        return resolve_library_root(config, media_type="movie", provider="tpdb")
+    if library_target not in (None, ""):
+        raise ValueError(f"Unsupported no-metadata library target: {library_target}")
+
+    provider_hint = _provider_hint_for_task(task)
+    if provider_hint is None:
+        raise ValueError(
+            "library_target is required for no-metadata publish when no "
+            "metadata provider hint exists"
+        )
+    return resolve_library_root(config, media_type="movie", provider=provider_hint)
