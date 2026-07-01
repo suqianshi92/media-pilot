@@ -223,6 +223,8 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const [feedback, setFeedback] = useState<{ title: string; description: string; variant: 'success' | 'warning' | 'error' } | null>(null)
   const [showNoMetadataConfirm, setShowNoMetadataConfirm] = useState(false)
   const [noMetadataLibraryTarget, setNoMetadataLibraryTarget] = useState<'movie' | 'adult'>('movie')
+  const [profileOptions, setProfileOptions] = useState<Array<{ value: string; label: string; disabled?: boolean }>>([])
+  const [noMetadataSubmitting, setNoMetadataSubmitting] = useState(false)
 
   useEffect(() => {
     setKeyword(detail.search_keyword?.keyword ?? '')
@@ -233,12 +235,33 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
     setFeedback(null)
     setShowNoMetadataConfirm(false)
     setNoMetadataLibraryTarget('movie')
+    setNoMetadataSubmitting(false)
   }, [detail.task.id, detail.search_keyword?.keyword])
+
+  useEffect(() => {
+    let cancelled = false
+    service.getProfileOptions()
+      .then((options) => {
+        if (!cancelled) setProfileOptions(options)
+      })
+      .catch(() => {
+        if (!cancelled) setProfileOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [service])
 
   const handleScopeLabel = (value: ResearchScope): string => {
     if (value === 'all') return t('taskWorkspace.allEnabledSources')
     return getProfileLabel(value)
   }
+  const enabledProfileValues = new Set(
+    profileOptions.filter((option) => !option.disabled).map((option) => option.value),
+  )
+  const researchScopes: ResearchScope[] = (['all', 'tmdb_movie', 'tmdb_show', 'tpdb_adult_movie'] as ResearchScope[])
+    .filter((value) => value === 'all' || enabledProfileValues.has(value))
+  const adultNoMetadataEnabled = enabledProfileValues.has('tpdb_adult_movie')
 
   const researchMutation = useMutation({
     mutationFn: () => service.researchCandidates(taskId, keyword.trim(), scope),
@@ -339,7 +362,6 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       })
     },
     onSuccess: async (result) => {
-      setShowNoMetadataConfirm(false)
       const status = result.data.status
       setFeedback({
         variant: status === 'waiting_user' ? 'warning' : 'success',
@@ -357,7 +379,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
       await taskDetailPromise
     },
     onError: (err) => {
-      setShowNoMetadataConfirm(false)
+      setNoMetadataSubmitting(false)
       setFeedback({
         variant: 'error',
         title: t('taskWorkspace.noMetadataPublishFailed'),
@@ -380,6 +402,15 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
   const handlePublishWithoutMetadata = () => {
     if (isAgentRunning || publishWithoutMetadataMutation.isPending) return
     setShowNoMetadataConfirm(true)
+  }
+
+  const submitNoMetadataPublish = () => {
+    if (noMetadataSubmitting || publishWithoutMetadataMutation.isPending) return
+    setNoMetadataSubmitting(true)
+    setShowNoMetadataConfirm(false)
+    publishWithoutMetadataMutation.mutate(undefined, {
+      onSettled: () => setNoMetadataSubmitting(false),
+    })
   }
 
   return (
@@ -442,10 +473,9 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
           disabled={isAgentRunning}
           className="h-10 rounded-md border border-border bg-background px-3 text-sm text-surface-foreground outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <option value="all">{handleScopeLabel('all')}</option>
-          <option value="tmdb_movie">{handleScopeLabel('tmdb_movie')}</option>
-          <option value="tmdb_show">{handleScopeLabel('tmdb_show')}</option>
-          <option value="tpdb_adult_movie">{handleScopeLabel('tpdb_adult_movie')}</option>
+          {researchScopes.map((value) => (
+            <option key={value} value={value}>{handleScopeLabel(value)}</option>
+          ))}
         </select>
         <Button
           onClick={handleSearch}
@@ -463,10 +493,10 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
         title={t('taskWorkspace.noMetadataPublishConfirmTitle')}
         description={t('taskWorkspace.noMetadataPublishConfirm')}
         confirmLabel={t('taskWorkspace.publishWithoutMetadata')}
-        loading={publishWithoutMetadataMutation.isPending}
-        onConfirm={() => publishWithoutMetadataMutation.mutate()}
+        loading={noMetadataSubmitting}
+        onConfirm={submitNoMetadataPublish}
         onCancel={() => {
-          if (!publishWithoutMetadataMutation.isPending) setShowNoMetadataConfirm(false)
+          if (!noMetadataSubmitting) setShowNoMetadataConfirm(false)
         }}
       >
         <div className="grid gap-2">
@@ -479,7 +509,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
               name="no-metadata-library-target"
               value="movie"
               checked={noMetadataLibraryTarget === 'movie'}
-              disabled={publishWithoutMetadataMutation.isPending}
+              disabled={noMetadataSubmitting}
               onChange={() => setNoMetadataLibraryTarget('movie')}
               className="mt-1"
             />
@@ -492,25 +522,27 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
               </span>
             </span>
           </label>
-          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
-            <input
-              type="radio"
-              name="no-metadata-library-target"
-              value="adult"
-              checked={noMetadataLibraryTarget === 'adult'}
-              disabled={publishWithoutMetadataMutation.isPending}
-              onChange={() => setNoMetadataLibraryTarget('adult')}
-              className="mt-1"
-            />
-            <span>
-              <span className="block font-medium text-surface-foreground">
-                {t('taskWorkspace.noMetadataLibraryTargetAdult')}
+          {adultNoMetadataEnabled ? (
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-3 text-sm">
+              <input
+                type="radio"
+                name="no-metadata-library-target"
+                value="adult"
+                checked={noMetadataLibraryTarget === 'adult'}
+                disabled={noMetadataSubmitting}
+                onChange={() => setNoMetadataLibraryTarget('adult')}
+                className="mt-1"
+              />
+              <span>
+                <span className="block font-medium text-surface-foreground">
+                  {t('taskWorkspace.noMetadataLibraryTargetAdult')}
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  {t('taskWorkspace.noMetadataLibraryTargetAdultDesc')}
+                </span>
               </span>
-              <span className="block text-xs text-muted-foreground">
-                {t('taskWorkspace.noMetadataLibraryTargetAdultDesc')}
-              </span>
-            </span>
-          </label>
+            </label>
+          ) : null}
         </div>
       </ConfirmDialog>
 
