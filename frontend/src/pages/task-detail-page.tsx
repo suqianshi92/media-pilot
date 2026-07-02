@@ -583,11 +583,11 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
               }
 
               return (
-                <MetadataCandidateCard key={`${candidate.provider}:${candidate.media_type}:${candidate.provider_id}`} variant="compact" candidate={cardCandidate}>
+                <MetadataCandidateCard key={`${candidate.provider}:${candidate.media_type}:${candidate.provider_id}`} variant="medium" candidate={cardCandidate}>
                   <Button
                     variant="default"
                     size="sm"
-                    className="h-8 shrink-0"
+                    className="mt-3 h-8 shrink-0"
                     disabled={isAgentRunning || manualSelectMutation.isPending}
                     onClick={() => {
                       handleSelect(candidate)
