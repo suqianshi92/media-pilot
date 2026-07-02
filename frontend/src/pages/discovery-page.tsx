@@ -269,9 +269,9 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
   const displayedCandidates = filteredCandidates.slice(0, showCount)
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex h-[calc(100vh-6.5rem)] flex-col gap-6 overflow-hidden">
       {/* 搜索栏 */}
-      <div className="flex flex-col gap-2">
+      <div className="flex shrink-0 flex-col gap-2">
         <div className="flex gap-2">
           <Input
             placeholder={t('discovery.searchPlaceholder')}
@@ -372,16 +372,17 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
         />
       )}
 
-      {candidates.length > 0 && (
-        <div className="grid gap-3">
-          {displayedCandidates.map((c) => {
-            const state = getIdentifyState(c.candidate_token)
-            return (
-              <article
-                key={c.candidate_token}
-                data-testid="resource-candidate"
-                className="flex flex-col gap-3 rounded-md border border-border bg-surface px-4 py-3 overflow-hidden"
-              >
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+        {candidates.length > 0 && (
+          <div className="grid gap-3">
+            {displayedCandidates.map((c) => {
+              const state = getIdentifyState(c.candidate_token)
+              return (
+                <article
+                  key={c.candidate_token}
+                  data-testid="resource-candidate"
+                  className="flex flex-col gap-3 rounded-md border border-border bg-surface px-4 py-3 overflow-hidden"
+                >
                 {/* ---- 主行: 标题 + 操作按钮 ---- */}
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-0 flex-1 basis-64">
@@ -526,22 +527,23 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
                     )}
                   </div>
                 )}
-              </article>
-            )
-          })}
-        </div>
-      )}
+                </article>
+              )
+            })}
+          </div>
+        )}
 
-      {/* 7.2: 显示更多 */}
-      {filteredCandidates.length > showCount && (
-        <Button
-          variant="secondary"
-          onClick={() => setShowCount(prev => prev + FIRST_SCREEN)}
-          className="self-center"
-        >
-          {t('discovery.showMore', { current: showCount, total: filteredCandidates.length })}
-        </Button>
-      )}
+        {/* 7.2: 显示更多 */}
+        {filteredCandidates.length > showCount && (
+          <Button
+            variant="secondary"
+            onClick={() => setShowCount(prev => prev + FIRST_SCREEN)}
+            className="mx-auto mt-4 flex"
+          >
+            {t('discovery.showMore', { current: showCount, total: filteredCandidates.length })}
+          </Button>
+        )}
+      </div>
 
       {/* 下载成功提示 */}
 

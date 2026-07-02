@@ -34,6 +34,10 @@ function renderTaskListPage(
   )
 }
 
+function getStatusFilterSelect() {
+  return screen.getByRole('combobox', { name: '状态筛选' })
+}
+
 beforeEach(() => {
   createMockTaskService().reset()
 })
@@ -44,14 +48,15 @@ afterEach(() => {
 })
 
 describe('TaskListPage', () => {
-  it('renders stats summary cards and filter buttons', async () => {
+  it('renders stats summary cards and status filter dropdown', async () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '待确认' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '已完成' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '失败' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '全部' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '待确认' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '已完成' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '失败' })).toBeInTheDocument()
     })
   })
 
@@ -140,10 +145,10 @@ describe('TaskListPage', () => {
     renderTaskListPage(metadataFilterService)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '无元数据' })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: '无元数据' })).toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: '无元数据' }))
+    await user.selectOptions(getStatusFilterSelect(), 'no_metadata')
     await waitFor(() => {
       const badges = screen.getAllByText('无元数据').filter((node) => (
         node instanceof HTMLElement && node.className.includes('rounded-full')
@@ -160,16 +165,16 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
       expect(screen.getAllByText('共 12 条').length).toBeGreaterThan(0)
     })
 
-    await user.click(screen.getByRole('button', { name: '待确认' }))
+    await user.selectOptions(getStatusFilterSelect(), 'waiting_user')
     await waitFor(() => {
       expect(screen.getAllByText('共 5 条').length).toBeGreaterThan(0)
     })
 
-    await user.click(screen.getByRole('button', { name: '已完成' }))
+    await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
     await waitFor(() => {
       expect(screen.getAllByText('共 2 条').length).toBeGreaterThan(0)
     })
@@ -283,7 +288,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(service)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '待确认' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     await waitFor(() => {
@@ -425,8 +430,8 @@ describe('TaskListPage', () => {
       expect(screen.getAllByText('共 5 条').length).toBeGreaterThan(0)
     })
 
-    // 用户点击切换到"已完成"
-    await user.click(screen.getByRole('button', { name: '已完成' }))
+    // 用户切换到"已完成"
+    await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
     await waitFor(() => {
       expect(screen.getAllByText('共 2 条').length).toBeGreaterThan(0)
     })
@@ -436,7 +441,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // dl-downloading 的 progress=0.72 → 显示 72%
@@ -452,7 +457,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // dl-failed（sync_failed 无 ingest_task_id）→ 下载失败
@@ -465,7 +470,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     await user.selectOptions(screen.getByLabelText('每页'), '20')
@@ -481,7 +486,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 入库任务（无 download_task）的下载状态列显示 —
@@ -494,7 +499,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // dl-failed 是 sync_failed → 下载状态列显示下载失败
@@ -518,7 +523,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 带 +08:00 偏移的时间串 → 直接按偏移解析 → 05/08 10:00
@@ -537,7 +542,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // dl-failed 和 dl-downloading 都是 download-only，应显示删除按钮
@@ -549,7 +554,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 待确认和处理中的入库任务应该显示删除按钮
@@ -562,12 +567,12 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 切换到"已完成"筛选，此时应只有已发布的任务，不应显示删除按钮
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '已完成' }))
+    await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
 
     await waitFor(() => {
       const deleteButtons = screen.queryAllByRole('button', { name: '删除' })
@@ -580,7 +585,7 @@ describe('TaskListPage', () => {
     renderTaskListPage()
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     const deleteButtons = screen.getAllByRole('button', { name: '删除' })
@@ -609,7 +614,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(service)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 点击第一个删除按钮
@@ -674,7 +679,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(completedTaskService)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 所有 ingest 任务都是 completed 状态且没有 download-only 卡片，不应有删除按钮
@@ -709,7 +714,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(qbErrorService)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 点击删除按钮打开弹窗
@@ -886,7 +891,7 @@ describe('TaskListPage', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 提取桌面表格的状态列顺序
@@ -1093,7 +1098,7 @@ describe('TaskListPage', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     // 桌面表格第一列是 status badge. 4 条混合 flow, 顺序必须是
@@ -1155,7 +1160,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(service)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
 
     expect(listFlowsSpy).toHaveBeenCalled()
@@ -1231,7 +1236,7 @@ describe('TaskListPage', () => {
 
     // 1) 初次加载: 调用 page=1 且不传 page_size=200
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+      expect(getStatusFilterSelect()).toBeInTheDocument()
     })
     const firstCallArgs = listFlowsSpy.mock.calls[0]?.[0] ?? {}
     expect(firstCallArgs.page ?? 1).toBe(1)
@@ -1251,7 +1256,7 @@ describe('TaskListPage', () => {
 
     // 3) 切 filter: 必须回到 page=1
     const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '待确认' }))
+    await user.selectOptions(getStatusFilterSelect(), 'waiting_user')
     await waitFor(() => {
       const calls = listFlowsSpy.mock.calls
       const lastFilterCall = [...calls].reverse().find(
@@ -1600,7 +1605,7 @@ describe('TaskListPage', () => {
 
     // 防御: 切到 library_import_complete, 4 个卡仍然显示全局 5/4/2/12,
     // 不会被当前 completed 页 items 干扰.
-    await user.click(screen.getByRole('button', { name: '已完成' }))
+    await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
     await waitFor(() => {
       const allStatCards = document.querySelectorAll('strong.text-2xl')
       const values = Array.from(allStatCards).map((el) => el.textContent?.trim())
@@ -1715,10 +1720,10 @@ describe('TaskListPage', () => {
 
     renderTaskListPage(service)
 
-    // 等页面进入成功渲染态 (按角色找 "全部" 过滤按钮, 等待 StatCard
+    // 等页面进入成功渲染态 (按角色找状态筛选下拉, 等待 StatCard
     // 出现 — 任何 StatCard 渲染都说明 flowsQuery + 4 filter total
     // 都已首次 resolve). findByRole 自动重试.
-    await screen.findByRole('button', { name: '全部' })
+    await screen.findByRole('combobox', { name: '状态筛选' })
     await waitFor(() => {
       expect(listFlowsSpy.mock.calls.length).toBeGreaterThanOrEqual(5)
     })
@@ -1749,7 +1754,7 @@ describe('TaskListPage', () => {
     renderTaskListPage(service)
 
     // 等所有 5 个 listFlows 都首次完成.
-    await screen.findByRole('button', { name: '全部' })
+    await screen.findByRole('combobox', { name: '状态筛选' })
     await waitFor(() => {
       expect(listFlowsSpy.mock.calls.length).toBeGreaterThanOrEqual(5)
     })

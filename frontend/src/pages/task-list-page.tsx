@@ -587,6 +587,7 @@ export function TaskListPage({
   const allItems = useMemo((): FlowSummary[] => flowsQuery.data?.data.items ?? [], [flowsQuery.data])
   // 页面 total 走 /flows meta.total, 不得用 items.length.
   const totalCount = flowsQuery.data?.meta.total ?? 0
+  const activeFilterLabel = t(filterKeys.find((option) => option.value === activeFilter)?.key ?? 'taskList.filter_all')
 
   // 自动轮询: ingest flow 走 mock tick 推进状态; download-only flow
   // 没有任何客户端副作用, 但必须触发列表 + 4 个 filter total 一起刷新.
@@ -621,7 +622,7 @@ export function TaskListPage({
 
   if (flowsQuery.isLoading) {
     return (
-      <div>
+      <div className="flex h-[calc(100vh-6.5rem)] flex-col overflow-hidden">
         <PageHeader title={t('taskList.title')} description={t('taskList.description')} />
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4 mb-6">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -635,7 +636,7 @@ export function TaskListPage({
 
   if (flowsQuery.isError && !flowsQuery.data) {
     return (
-      <div>
+      <div className="flex h-[calc(100vh-6.5rem)] flex-col overflow-hidden">
         <PageHeader title={t('taskList.title')} description={t('taskList.description')} />
         <ErrorState
           title={t('common.error')}
@@ -651,7 +652,7 @@ export function TaskListPage({
   }
 
   return (
-    <div>
+    <div className="flex h-[calc(100vh-6.5rem)] flex-col overflow-hidden">
       <PageHeader
         title={t('taskList.title')}
         description={t('taskList.description')}
@@ -666,7 +667,7 @@ export function TaskListPage({
         }
       />
 
-      <div className="grid gap-3 grid-cols-2 xl:grid-cols-4 mb-6">
+      <div className="grid shrink-0 gap-3 grid-cols-2 xl:grid-cols-4 mb-6">
         <StatCard
           label={t('dashboard.pendingConfirm')}
           value={waitingUserTotalQuery.data?.meta.total ?? null}
@@ -689,29 +690,42 @@ export function TaskListPage({
         />
       </div>
 
-      <PageToolbar>
-        {filterKeys.map((option) => (
-          <Button
-            key={option.value}
-            onClick={() => setActiveFilter(option.value)}
-            size="sm"
-            variant={activeFilter === option.value ? 'default' : 'secondary'}
+      <PageToolbar className="shrink-0">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>{t('taskList.filterLabel')}</span>
+          <select
+            value={activeFilter}
+            onChange={(event) => setActiveFilter(event.target.value as FlowFilter)}
+            aria-label={t('taskList.filterLabel')}
+            className="h-9 min-w-36 rounded-md border border-border bg-background px-3 text-sm text-surface-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
-            {t(option.key)}
-          </Button>
-        ))}
+            {filterKeys.map((option) => (
+              <option key={option.value} value={option.value}>
+                {t(option.key)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="text-xs text-muted-foreground">
+          {t('taskList.activeFilter', { filter: activeFilterLabel })}
+        </span>
       </PageToolbar>
 
       {allItems.length === 0 ? (
-        <EmptyState
-          title={t('taskList.noTasks')}
-          description={t('taskList.noTasksDesc')}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          <EmptyState
+            title={activeFilter === 'all' ? t('taskList.noTasks') : t('taskList.noFilteredTasks')}
+            description={activeFilter === 'all' ? t('taskList.noTasksDesc') : t('taskList.noFilteredTasksDesc')}
+          />
+        </div>
       ) : (
         <DataTable
           columns={taskColumns(t)}
           data={allItems}
           disablePagination
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          tableContainerClassName="min-h-0 flex-1"
+          mobileContainerClassName="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1"
           columnClassNames={TASK_LIST_COLUMN_CLASSES}
           tableClassName="min-w-[1200px] table-fixed"
           serverPagination={{

@@ -95,6 +95,8 @@
     "filter_completed": "已完成",
     "filter_failed": "失败",
     "filter_noMetadata": "无元数据",
+    "filterLabel": "状态筛选",
+    "activeFilter": "当前：{{filter}}",
     "noMetadata": "无元数据",
     "noTasks": "当前还没有任务",
     "noTasksDesc": "提交资源搜索下载后，这里会显示下载进度和处理队列。",

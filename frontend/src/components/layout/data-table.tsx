@@ -28,6 +28,9 @@ interface DataTableProps<T> {
   renderMobileCard: (item: T) => React.ReactNode
   tableMeta?: Record<string, unknown>
   columnClassNames?: Record<string, string>
+  className?: string
+  tableContainerClassName?: string
+  mobileContainerClassName?: string
   tableClassName?: string
   serverPagination?: ServerPagination
   /**
@@ -68,6 +71,9 @@ export function DataTable<T>({
   renderMobileCard,
   tableMeta,
   columnClassNames = {},
+  className = '',
+  tableContainerClassName = '',
+  mobileContainerClassName = '',
   tableClassName = '',
   serverPagination,
   disablePagination = false,
@@ -90,9 +96,9 @@ export function DataTable<T>({
   const getColumnClassName = (columnId: string) => columnClassNames[columnId] ?? ''
 
   return (
-    <div>
+    <div className={className}>
       {/* 桌面表格 */}
-      <div className="hidden md:block overflow-x-auto rounded-lg border border-border">
+      <div className={`hidden md:block overflow-auto rounded-lg border border-border ${tableContainerClassName}`}>
         <table className={`w-full text-sm ${tableClassName}`}>
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -128,8 +134,10 @@ export function DataTable<T>({
       </div>
 
       {/* 窄屏卡片 */}
-      <div className="md:hidden grid gap-3">
-        {table.getRowModel().rows.map((row) => renderMobileCard(row.original))}
+      <div className={`md:hidden grid gap-3 ${mobileContainerClassName}`}>
+        {table.getRowModel().rows.map((row) => (
+          <div key={row.id}>{renderMobileCard(row.original)}</div>
+        ))}
       </div>
 
       {serverPagination && serverPagination.total > 0 && (

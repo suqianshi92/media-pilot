@@ -95,6 +95,8 @@
     "filter_completed": "Completed",
     "filter_failed": "Failed",
     "filter_noMetadata": "No Metadata",
+    "filterLabel": "Status filter",
+    "activeFilter": "Current: {{filter}}",
     "noMetadata": "No Metadata",
     "noTasks": "No tasks yet",
     "noTasksDesc": "After submitting a resource search and download, download progress and processing queue will appear here.",
