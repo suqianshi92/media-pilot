@@ -567,7 +567,7 @@ function ManualMetadataResearchSection({ detail, service = defaultTaskService }:
         ) : null}
 
         {candidates.length > 0 ? (
-          <div className="grid max-h-80 gap-2 overflow-y-auto overflow-x-hidden pr-1">
+          <div className="grid max-h-80 auto-rows-max gap-2 overflow-y-auto overflow-x-hidden pr-1">
             {candidates.map((candidate) => {
               const cardCandidate: MetadataCardCandidate = {
                 title: candidate.title,
