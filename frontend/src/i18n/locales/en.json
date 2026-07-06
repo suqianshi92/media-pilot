@@ -663,7 +663,7 @@
     }
   },
   "discovery": {
-    "searchPlaceholder": "Enter title or description, e.g. Weathering with You 1080p",
+    "searchPlaceholder": "Enter title",
     "searchKeywords": "Search Keywords",
     "analysisReason": "Analysis Reason",
     "searchTypeLabel": "Search Type",
@@ -687,7 +687,6 @@
     "downloadSubmitFailed": "Download submission failed",
     "identifyFailed": "Identification failed",
     "identifyRequestFailed": "Identification request failed",
-    "directSearchTip": "Search indexers directly, without AI intent analysis",
     "contentDiscovery": "Content Discovery",
     "newDiscoverySession": "New Session",
     "contentDiscoveryEmpty": "No content discovery session",
@@ -698,6 +697,7 @@
     "searchType": {
       "all": "All",
       "movie": "Movies",
+      "show": "TV Shows",
       "adult": "Adult"
     },
     "relevance": {

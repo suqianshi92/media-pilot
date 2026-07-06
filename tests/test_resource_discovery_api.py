@@ -64,3 +64,32 @@ def test_resource_search_defaults_to_direct_keyword_search(tmp_path: Path, monke
     req = adapter.search.call_args.args[0]
     assert req.query == "modern western"
     assert req.search_type == "all"
+
+
+def test_resource_search_accepts_show_type(tmp_path: Path, monkeypatch) -> None:
+    adapter = MagicMock()
+    adapter.search.return_value = ResourceSearchResult(
+        candidates=[],
+        source="prowlarr",
+        query_used="Breaking Bad",
+        search_type="show",
+        message="未找到",
+    )
+    monkeypatch.setattr(
+        "media_pilot.services.resource_discovery.ProwlarrAdapter",
+        lambda _config: adapter,
+    )
+
+    client = TestClient(create_app(config=_make_config(tmp_path)))
+    response = client.post(
+        "/api/v1/resource-discovery/search",
+        json={"input_text": "Breaking Bad", "search_type": "show"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "success"
+    assert body["data"]["search_type"] == "show"
+    req = adapter.search.call_args.args[0]
+    assert req.query == "Breaking Bad"
+    assert req.search_type == "show"

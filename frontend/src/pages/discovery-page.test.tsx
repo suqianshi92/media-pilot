@@ -154,7 +154,10 @@ describe('DiscoveryPage', () => {
     render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage />} /></Routes></MemoryRouter></ToastProvider>)
     expect(screen.getByText('全部')).toBeInTheDocument()
     expect(screen.getByText('电影')).toBeInTheDocument()
+    expect(screen.getByText('剧集')).toBeInTheDocument()
     expect(screen.getByText('成人')).toBeInTheDocument()
+    expect(getInput()).toHaveAttribute('placeholder', '输入片名')
+    expect(screen.queryByText('直接查询资源索引，不调用 AI 意图分析')).not.toBeInTheDocument()
   })
 
   it('shows results and calls searchResources with search type', async () => {
@@ -197,6 +200,16 @@ describe('DiscoveryPage', () => {
     await userEvent.click(getSearchBtn())
     await waitFor(() => { expect(searchFn).toHaveBeenCalledWith('天气之子', 'movie', true) })
     expect(screen.queryByTestId('intent-summary')).not.toBeInTheDocument()
+  })
+
+  it('uses show search type when selected', async () => {
+    const searchFn = vi.fn().mockResolvedValue(mockSearchResult('ok'))
+    const svc = mockService({ searchResources: searchFn })
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+    await userEvent.click(screen.getByText('剧集'))
+    await userEvent.type(getInput(), 'Breaking Bad')
+    await userEvent.click(getSearchBtn())
+    await waitFor(() => { expect(searchFn).toHaveBeenCalledWith('Breaking Bad', 'show', true) })
   })
 
   it('streams markdown content discovery messages', async () => {

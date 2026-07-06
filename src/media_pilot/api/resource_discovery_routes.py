@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/v1/resource-discovery")
 
 class ResourceSearchBody(BaseModel):
     input_text: str = Field(..., min_length=1, description="资源查询关键词")
-    search_type: str = Field("all", description="搜索类型覆盖: all / movie / adult")
+    search_type: str = Field("all", description="搜索类型覆盖: all / movie / show / adult")
     skip_intent: bool = Field(True, description="是否跳过 LLM 意图解析，直接用原始关键词搜索")
 
 
@@ -57,13 +57,13 @@ def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
 
     # 验证 search_type
     search_type = body.search_type
-    if search_type not in ("all", "movie", "adult"):
+    if search_type not in ("all", "movie", "show", "adult"):
         return ApiEnvelope(
             status="error",
             data={},
             messages=[ApiMessage(
                 level="error", code="invalid_search_type",
-                text=f"无效搜索类型: {search_type}。允许值: all/movie/adult",
+                text=f"无效搜索类型: {search_type}。允许值: all/movie/show/adult",
             )],
             meta={},
         )

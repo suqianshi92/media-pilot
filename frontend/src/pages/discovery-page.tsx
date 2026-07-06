@@ -313,6 +313,17 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
             <input
               type="radio"
               name="search-type"
+              value="show"
+              checked={searchType === 'show'}
+              onChange={() => { setSearchType('show'); setShowCount(FIRST_SCREEN) }}
+              className="accent-primary"
+            />
+            {t('discovery.searchType.show')}
+          </label>
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="search-type"
               value="adult"
               checked={searchType === 'adult'}
               onChange={() => { setSearchType('adult'); setShowCount(FIRST_SCREEN) }}
@@ -320,7 +331,6 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
             />
             {t('discovery.searchType.adult')}
           </label>
-          <span className="text-xs text-muted-foreground self-center ml-2">{t('discovery.directSearchTip')}</span>
         </div>
         </div>
 

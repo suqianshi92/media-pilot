@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 # https://prowlarr.com/docs/api/
 _CATEGORY_MAP: dict[str, list[int]] = {
     "movie": [2000],
+    "show": [5000],
     "adult": [6000],
-    "all": [2000, 6000],
+    "all": [2000, 5000, 6000],
 }
 
 

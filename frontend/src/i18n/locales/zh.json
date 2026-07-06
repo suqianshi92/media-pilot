@@ -664,7 +664,7 @@
     }
   },
   "discovery": {
-    "searchPlaceholder": "输入片名或描述，例如：天气之子 1080p",
+    "searchPlaceholder": "输入片名",
     "searchKeywords": "搜索关键词",
     "analysisReason": "分析理由",
     "searchTypeLabel": "搜索类型",
@@ -688,7 +688,6 @@
     "downloadSubmitFailed": "下载提交失败",
     "identifyFailed": "识别失败",
     "identifyRequestFailed": "识别请求失败",
-    "directSearchTip": "直接查询资源索引，不调用 AI 意图分析",
     "contentDiscovery": "内容发现",
     "newDiscoverySession": "新会话",
     "contentDiscoveryEmpty": "暂无内容发现会话",
@@ -705,6 +704,7 @@
     "searchType": {
       "all": "全部",
       "movie": "电影",
+      "show": "剧集",
       "adult": "成人"
     },
     "relevance": {

@@ -15,7 +15,7 @@ from typing import Protocol
 class ResourceSearchRequest:
     """Prowlarr 搜索请求"""
     query: str
-    search_type: str  # "all" | "movie" | "adult"
+    search_type: str  # "all" | "movie" | "show" | "adult"
     limit: int = 20
 
 
@@ -95,7 +95,7 @@ class ToolConnectionStatus:
 class ResourceIntent:
     """LLM 解析的结构化搜索意图"""
     query_text: str  # 原始用户输入
-    search_type: str  # "movie" | "adult" | "all"
+    search_type: str  # "movie" | "show" | "adult" | "all"
     title_candidates: list[str] = field(default_factory=list)
     resource_keywords: list[str] = field(default_factory=list)
     quality_hint: str = ""  # DEPRECATED: 保留以兼容旧数据，新代码使用 preferred_* 字段

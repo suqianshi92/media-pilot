@@ -123,9 +123,19 @@ class TestSearchCategoryMapping:
         result = adapter.search(ResourceSearchRequest(query="ABP-123", search_type="adult"))
         assert result.search_type == "adult"
 
-    def test_all_categories_2000_6000(self, mock_client):
+    def test_show_category_5000(self, mock_client):
         mock_client.add_response(
-            url="http://prowlarr:9696/api/v1/search?query=test&type=search&categories=2000&categories=6000&limit=20",
+            url="http://prowlarr:9696/api/v1/search?query=Breaking+Bad&type=search&categories=5000&limit=20",
+            json=[],
+        )
+        cfg = _make_config(prowlarr_url="http://prowlarr:9696", api_key="key")
+        adapter = ProwlarrAdapter(cfg)
+        result = adapter.search(ResourceSearchRequest(query="Breaking Bad", search_type="show"))
+        assert result.search_type == "show"
+
+    def test_all_categories_2000_5000_6000(self, mock_client):
+        mock_client.add_response(
+            url="http://prowlarr:9696/api/v1/search?query=test&type=search&categories=2000&categories=5000&categories=6000&limit=20",
             json=[],
         )
         cfg = _make_config(prowlarr_url="http://prowlarr:9696", api_key="key")
