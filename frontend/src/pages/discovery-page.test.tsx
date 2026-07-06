@@ -220,6 +220,38 @@ describe('DiscoveryPage', () => {
     )
   })
 
+  it('sends content discovery message on Enter', async () => {
+    const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
+      onDelta('收到')
+    })
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+
+    const input = screen.getByTestId('content-discovery-input')
+    await userEvent.type(input, '推荐现代西部片')
+    await userEvent.keyboard('{Enter}')
+
+    await waitFor(() => {
+      expect(streamContentDiscovery).toHaveBeenCalledWith(
+        [{ role: 'user', content: '推荐现代西部片' }],
+        expect.any(Function),
+      )
+    })
+  })
+
+  it('keeps newline on Shift Enter without sending', async () => {
+    const streamContentDiscovery = vi.fn()
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+
+    const input = screen.getByTestId('content-discovery-input') as HTMLTextAreaElement
+    await userEvent.type(input, '现代西部片')
+    await userEvent.keyboard('{Shift>}{Enter}{/Shift}')
+
+    expect(streamContentDiscovery).not.toHaveBeenCalled()
+    expect(input.value).toBe('现代西部片\n')
+  })
+
   it('keeps local content discovery context across turns', async () => {
     const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
       onDelta('收到')

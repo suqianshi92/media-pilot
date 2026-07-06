@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 import { Search, Download, Loader2, Scan, RotateCcw, Send, Sparkles } from 'lucide-react'
@@ -603,6 +603,13 @@ function ContentDiscoveryPanel({ service }: { service: TaskService }) {
     setError(null)
   }
 
+  function handleInputKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey) return
+    if ((event.nativeEvent as KeyboardEvent).isComposing) return
+    event.preventDefault()
+    void handleSubmit()
+  }
+
   return (
     <aside
       className="relative flex min-h-72 shrink-0 flex-col overflow-hidden rounded-md border border-border bg-surface lg:h-full"
@@ -659,6 +666,7 @@ function ContentDiscoveryPanel({ service }: { service: TaskService }) {
         <textarea
           value={input}
           onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleInputKeyDown}
           disabled={streaming}
           placeholder={t('discovery.contentDiscoveryPlaceholder')}
           className="min-h-20 w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
