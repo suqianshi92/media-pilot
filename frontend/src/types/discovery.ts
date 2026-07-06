@@ -55,3 +55,8 @@ export interface ResourceSearchData {
   message: string
   intent: ResourceIntent
 }
+
+export interface ContentDiscoveryMessage {
+  role: 'user' | 'assistant'
+  content: string
+}

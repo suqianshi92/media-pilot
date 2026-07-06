@@ -1,13 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
-import { Search, Download, Loader2, Scan } from 'lucide-react'
-import type { ResourceCandidate, ResourceIntent } from '@/types/discovery'
+import { Search, Download, Loader2, Scan, RotateCcw, Send, Sparkles } from 'lucide-react'
+import type { ContentDiscoveryMessage, ResourceCandidate, ResourceIntent } from '@/types/discovery'
 import { createTaskService, type TaskService } from '@/services/task-service'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MetadataCandidateCard, type MetadataCardCandidate } from '@/components/shared/metadata-candidate-card'
 import { useToast } from '@/components/shared/toast'
+import { MarkdownView } from '@/components/agent/markdown-view'
 
 type TagGroup = 'resolutions' | 'sources' | 'codecs' | 'hdr_tags' | 'audio_tags'
 
@@ -266,9 +267,10 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
   const displayedCandidates = filteredCandidates.slice(0, showCount)
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] flex-col gap-6 overflow-hidden">
-      {/* 搜索栏 */}
-      <div className="flex shrink-0 flex-col gap-2">
+    <div className="flex h-[calc(100vh-6.5rem)] flex-col gap-4 overflow-hidden lg:flex-row">
+      <main className="flex min-w-0 flex-1 flex-col gap-6 overflow-hidden">
+        {/* 搜索栏 */}
+        <div className="flex shrink-0 flex-col gap-2">
         <div className="flex gap-2">
           <Input
             placeholder={t('discovery.searchPlaceholder')}
@@ -320,41 +322,41 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
           </label>
           <span className="text-xs text-muted-foreground self-center ml-2">{t('discovery.directSearchTip')}</span>
         </div>
-      </div>
+        </div>
 
-      {/* 搜索结果 */}
-      {searchMessage && (
-        <p className="text-sm text-muted-foreground" role="status">{searchMessage}</p>
-      )}
+        {/* 搜索结果 */}
+        {searchMessage && (
+          <p className="text-sm text-muted-foreground" role="status">{searchMessage}</p>
+        )}
 
       {/* ── 4.x: 标签筛选条 ── */}
-      {candidates.length > 0 && (
-        <TagFilterBar
-          candidates={candidates}
-          active={activeTagFilters}
-          onToggle={(group, tag) => {
-            setActiveTagFilters((prev) => {
-              const next = new Set(prev[group])
-              if (next.has(tag)) next.delete(tag)
-              else next.add(tag)
-              return { ...prev, [group]: next }
-            })
-            setShowCount(FIRST_SCREEN)
-          }}
-          onReset={() => {
-            setActiveTagFilters({
-              resolutions: new Set(),
-              sources: new Set(),
-              codecs: new Set(),
-              hdr_tags: new Set(),
-              audio_tags: new Set(),
-            })
-            setShowCount(FIRST_SCREEN)
-          }}
-        />
-      )}
+        {candidates.length > 0 && (
+          <TagFilterBar
+            candidates={candidates}
+            active={activeTagFilters}
+            onToggle={(group, tag) => {
+              setActiveTagFilters((prev) => {
+                const next = new Set(prev[group])
+                if (next.has(tag)) next.delete(tag)
+                else next.add(tag)
+                return { ...prev, [group]: next }
+              })
+              setShowCount(FIRST_SCREEN)
+            }}
+            onReset={() => {
+              setActiveTagFilters({
+                resolutions: new Set(),
+                sources: new Set(),
+                codecs: new Set(),
+                hdr_tags: new Set(),
+                audio_tags: new Set(),
+              })
+              setShowCount(FIRST_SCREEN)
+            }}
+          />
+        )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
         {candidates.length > 0 && (
           <div className="grid gap-3">
             {displayedCandidates.map((c) => {
@@ -525,11 +527,151 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
             {t('discovery.showMore', { current: showCount, total: filteredCandidates.length })}
           </Button>
         )}
+        </div>
+
+        {/* 下载成功提示 */}
+      </main>
+      <ContentDiscoveryPanel service={service} />
+    </div>
+  )
+}
+
+function ContentDiscoveryPanel({ service }: { service: TaskService }) {
+  const { t } = useTranslation()
+  const [messages, setMessages] = useState<ContentDiscoveryMessage[]>([])
+  const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [width, setWidth] = useState(380)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const resizingRef = useRef(false)
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [messages])
+
+  useEffect(() => {
+    function onMove(event: MouseEvent) {
+      if (!resizingRef.current) return
+      const next = window.innerWidth - event.clientX - 24
+      setWidth(Math.min(560, Math.max(320, next)))
+    }
+    function onUp() {
+      resizingRef.current = false
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  async function handleSubmit() {
+    const text = input.trim()
+    if (!text || streaming) return
+
+    const userMessage: ContentDiscoveryMessage = { role: 'user', content: text }
+    const requestMessages = [...messages, userMessage]
+    setMessages([...requestMessages, { role: 'assistant', content: '' }])
+    setInput('')
+    setStreaming(true)
+    setError(null)
+
+    try {
+      await service.streamContentDiscovery(requestMessages, (delta) => {
+        setMessages((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last?.role === 'assistant') {
+            next[next.length - 1] = { ...last, content: last.content + delta }
+          }
+          return next
+        })
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('discovery.contentDiscoveryFailed'))
+    } finally {
+      setStreaming(false)
+    }
+  }
+
+  function resetSession() {
+    if (streaming) return
+    setMessages([])
+    setInput('')
+    setError(null)
+  }
+
+  return (
+    <aside
+      className="relative flex min-h-72 shrink-0 flex-col overflow-hidden rounded-md border border-border bg-surface lg:h-full"
+      style={{ width: `min(100%, ${width}px)` }}
+      data-testid="content-discovery-panel"
+    >
+      <div
+        className="absolute left-0 top-0 hidden h-full w-1 cursor-col-resize bg-transparent hover:bg-border lg:block"
+        onMouseDown={() => { resizingRef.current = true }}
+        aria-hidden="true"
+      />
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <span>{t('discovery.contentDiscovery')}</span>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={resetSession}
+          disabled={streaming || messages.length === 0}
+          aria-label={t('discovery.newDiscoverySession')}
+          title={t('discovery.newDiscoverySession')}
+        >
+          <RotateCcw className="h-4 w-4" />
+        </Button>
       </div>
 
-      {/* 下载成功提示 */}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        {messages.length === 0 ? (
+          <div className="text-sm text-muted-foreground" data-testid="content-discovery-empty">
+            {t('discovery.contentDiscoveryEmpty')}
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {messages.map((message, idx) => (
+              <div
+                key={idx}
+                className={message.role === 'user'
+                  ? 'ml-8 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground'
+                  : 'mr-4 rounded-md border border-border bg-surface-dim px-3 py-2 text-sm'}
+              >
+                {message.role === 'assistant'
+                  ? <MarkdownView content={message.content || (streaming ? t('discovery.contentDiscoveryThinking') : '')} />
+                  : <p className="whitespace-pre-wrap break-words">{message.content}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+        {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
+      </div>
 
-    </div>
+      <div className="shrink-0 border-t border-border p-3">
+        <textarea
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          disabled={streaming}
+          placeholder={t('discovery.contentDiscoveryPlaceholder')}
+          className="min-h-20 w-full resize-none rounded-md border border-border bg-surface px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          data-testid="content-discovery-input"
+        />
+        <div className="mt-2 flex justify-end">
+          <Button onClick={handleSubmit} disabled={streaming || !input.trim()} size="sm">
+            {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {t('discovery.sendDiscoveryMessage')}
+          </Button>
+        </div>
+      </div>
+    </aside>
   )
 }
 

@@ -199,6 +199,65 @@ describe('DiscoveryPage', () => {
     expect(screen.queryByTestId('intent-summary')).not.toBeInTheDocument()
   })
 
+  it('streams markdown content discovery messages', async () => {
+    const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
+      onDelta('1. **赴汤蹈火**（2016）')
+      onDelta('\n   - 推荐搜索词：赴汤蹈火 2016')
+    })
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+
+    await userEvent.type(screen.getByTestId('content-discovery-input'), '推荐现代西部片')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('赴汤蹈火')).toBeInTheDocument()
+      expect(screen.getByText(/推荐搜索词：赴汤蹈火 2016/)).toBeInTheDocument()
+    })
+    expect(streamContentDiscovery).toHaveBeenCalledWith(
+      [{ role: 'user', content: '推荐现代西部片' }],
+      expect.any(Function),
+    )
+  })
+
+  it('keeps local content discovery context across turns', async () => {
+    const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
+      onDelta('收到')
+    })
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+
+    await userEvent.type(screen.getByTestId('content-discovery-input'), '推荐现代西部片')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(streamContentDiscovery).toHaveBeenCalledTimes(1) })
+
+    await userEvent.type(screen.getByTestId('content-discovery-input'), '更冷峻一点')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(streamContentDiscovery).toHaveBeenCalledTimes(2) })
+
+    expect(streamContentDiscovery.mock.calls[1][0]).toEqual([
+      { role: 'user', content: '推荐现代西部片' },
+      { role: 'assistant', content: '收到' },
+      { role: 'user', content: '更冷峻一点' },
+    ])
+  })
+
+  it('clears content discovery session', async () => {
+    const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
+      onDelta('1. **边境杀手**（2015）')
+    })
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+
+    await userEvent.type(screen.getByTestId('content-discovery-input'), '推荐冷峻犯罪片')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(screen.getByText('边境杀手')).toBeInTheDocument() })
+
+    await userEvent.click(screen.getByRole('button', { name: '新会话' }))
+    expect(screen.queryByText('边境杀手')).not.toBeInTheDocument()
+    expect(screen.getByTestId('content-discovery-empty')).toBeInTheDocument()
+  })
+
 
   // --- Phase 3: 候选识别默认策略修复 ---
 

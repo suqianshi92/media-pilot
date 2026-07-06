@@ -1,5 +1,6 @@
 import type { ApiEnvelope, ApiListEnvelope } from '@/types/api'
 import type { TaskService } from '@/services/task-service'
+import type { ContentDiscoveryMessage } from '@/types/discovery'
 import type {
   AgentDecisionDto,
   AgentMessageDto,
@@ -497,6 +498,21 @@ export function createMockTaskService(): TaskService {
         },
         messages: [] as { level: string; code: string; text: string }[],
         meta: {},
+      }
+    },
+
+    async streamContentDiscovery(
+      messages: ContentDiscoveryMessage[],
+      onDelta: (text: string) => void,
+    ) {
+      void messages
+      for (const delta of [
+        '1. **赴汤蹈火**（2016）',
+        '\n   - 推荐理由：现代西部片的犯罪与家庭困境很突出。',
+        '\n   - 推荐搜索词：赴汤蹈火 2016、Hell or High Water 2016',
+      ]) {
+        await new Promise((r) => setTimeout(r, 80))
+        onDelta(delta)
       }
     },
 

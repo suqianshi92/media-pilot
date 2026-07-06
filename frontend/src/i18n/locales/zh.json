@@ -689,6 +689,13 @@
     "identifyFailed": "识别失败",
     "identifyRequestFailed": "识别请求失败",
     "directSearchTip": "直接查询资源索引，不调用 AI 意图分析",
+    "contentDiscovery": "内容发现",
+    "newDiscoverySession": "新会话",
+    "contentDiscoveryEmpty": "暂无内容发现会话",
+    "contentDiscoveryPlaceholder": "题材、风格、剧情或相似作品",
+    "sendDiscoveryMessage": "发送",
+    "contentDiscoveryThinking": "生成中...",
+    "contentDiscoveryFailed": "内容发现失败",
     "searchMode": {
       "auto": "自动模式",
       "manual": "手动模式",

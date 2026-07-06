@@ -5,6 +5,7 @@
  */
 
 import type { ApiEnvelope, ApiListEnvelope } from '@/types/api'
+import type { ContentDiscoveryMessage } from '@/types/discovery'
 import type {
   AgentDecisionDto,
   AgentMessageDto,
@@ -121,6 +122,58 @@ async function apiPost<T>(path: string, data: unknown): Promise<T> {
   return body as T
 }
 
+async function streamPost(
+  path: string,
+  data: unknown,
+  onEvent: (event: string, payload: any) => void,
+): Promise<void> {
+  const url = `${BASE_URL}/api/v1${path}`
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!resp.ok) {
+    throw new ApiError(`HTTP ${resp.status}`, { status: resp.status })
+  }
+  if (!resp.body) {
+    throw new ApiError('Streaming response body is empty', { status: resp.status })
+  }
+
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const parts = buffer.split('\n\n')
+    buffer = parts.pop() ?? ''
+    for (const part of parts) {
+      const parsed = parseSseEvent(part)
+      if (parsed) onEvent(parsed.event, parsed.data)
+    }
+  }
+
+  buffer += decoder.decode()
+  if (buffer.trim()) {
+    const parsed = parseSseEvent(buffer)
+    if (parsed) onEvent(parsed.event, parsed.data)
+  }
+}
+
+function parseSseEvent(block: string): { event: string; data: any } | null {
+  let event = 'message'
+  const dataLines: string[] = []
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+  }
+  if (dataLines.length === 0) return null
+  return { event, data: JSON.parse(dataLines.join('\n')) }
+}
+
 export function createApiTaskService() {
   return {
     reset() {
@@ -228,6 +281,21 @@ export function createApiTaskService() {
 
     async searchResources(inputText: string, searchType: string = 'all', skipIntent: boolean = false): Promise<ApiEnvelope<import('@/types/discovery').ResourceSearchData>> {
       return apiPost('/resource-discovery/search', { input_text: inputText, search_type: searchType, skip_intent: skipIntent })
+    },
+
+    async streamContentDiscovery(
+      messages: ContentDiscoveryMessage[],
+      onDelta: (text: string) => void,
+    ): Promise<void> {
+      await streamPost('/content-discovery/stream', { messages }, (event, payload) => {
+        if (event === 'delta') {
+          onDelta(String(payload?.text ?? ''))
+          return
+        }
+        if (event === 'error') {
+          throw new ApiError(String(payload?.message ?? 'content discovery failed'))
+        }
+      })
     },
 
     async submitDownload(params: {
