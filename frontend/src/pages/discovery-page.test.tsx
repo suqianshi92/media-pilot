@@ -150,10 +150,11 @@ describe('DiscoveryPage', () => {
     expect(getSearchBtn()).toBeDisabled()
   })
 
-  it('shows search mode radio buttons', () => {
+  it('shows search type radio buttons', () => {
     render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage />} /></Routes></MemoryRouter></ToastProvider>)
-    expect(screen.getByText('自动模式')).toBeInTheDocument()
-    expect(screen.getByText('手动模式')).toBeInTheDocument()
+    expect(screen.getByText('全部')).toBeInTheDocument()
+    expect(screen.getByText('电影')).toBeInTheDocument()
+    expect(screen.getByText('成人')).toBeInTheDocument()
   })
 
   it('shows results and calls searchResources with search type', async () => {
@@ -165,10 +166,10 @@ describe('DiscoveryPage', () => {
     await userEvent.type(getInput(), 'test')
     await userEvent.click(getSearchBtn())
     await waitFor(() => { expect(screen.getByText('找到 1 个候选')).toBeInTheDocument() })
-    expect(searchFn).toHaveBeenCalledWith('test', 'all', false)
+    expect(searchFn).toHaveBeenCalledWith('test', 'all', true)
   })
 
-  it('displays intent summary in auto mode', async () => {
+  it('does not display LLM intent summary for direct resource search', async () => {
     const searchFn = vi.fn().mockResolvedValue(
       mockSearchResult('ok', [], { query_text: '天气之子 1080p', reason: '动画电影', resource_keywords: ['天气之子 1080p'] })
     )
@@ -178,42 +179,23 @@ describe('DiscoveryPage', () => {
     await userEvent.type(getInput(), '天气之子')
     await userEvent.click(getSearchBtn())
     await waitFor(() => {
-      expect(screen.getByText('天气之子 1080p')).toBeInTheDocument()
-      expect(screen.getByText('动画电影')).toBeInTheDocument()
+      expect(searchFn).toHaveBeenCalledWith('天气之子', 'all', true)
     })
-    expect(screen.queryByText(/\"query_text\"/)).not.toBeInTheDocument()
-  })
-
-  it('does not display intent summary in manual mode', async () => {
-    const searchFn = vi.fn().mockResolvedValue(
-      mockSearchResult('ok', [], { query_text: '天气之子 1080p', reason: '动画电影', resource_keywords: ['天气之子 1080p'] })
-    )
-    const svc = mockService({ searchResources: searchFn })
-    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
-    // 切换到手动模式
-    await userEvent.click(screen.getByText('手动模式'))
-    await userEvent.type(getInput(), '天气之子')
-    await userEvent.click(getSearchBtn())
-    await waitFor(() => { expect(searchFn).toHaveBeenCalled() })
-    // 手动模式下不应渲染 LLM 解析摘要卡
     expect(screen.queryByTestId('intent-summary')).not.toBeInTheDocument()
+    expect(screen.queryByText(/\"query_text\"/)).not.toBeInTheDocument()
     expect(screen.queryByText('动画电影')).not.toBeInTheDocument()
   })
 
-  it('manual results keep summary hidden after switching back to auto mode', async () => {
+  it('uses selected search type without enabling intent parsing', async () => {
     const searchFn = vi.fn().mockResolvedValue(
       mockSearchResult('ok', [], { query_text: '天气之子 1080p', reason: '动画电影', resource_keywords: ['天气之子 1080p'] })
     )
     const svc = mockService({ searchResources: searchFn })
     render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
-    // 手动模式搜索
-    await userEvent.click(screen.getByText('手动模式'))
+    await userEvent.click(screen.getByText('电影'))
     await userEvent.type(getInput(), '天气之子')
     await userEvent.click(getSearchBtn())
-    await waitFor(() => { expect(searchFn).toHaveBeenCalled() })
-    expect(screen.queryByTestId('intent-summary')).not.toBeInTheDocument()
-    // 切回自动模式 — 不重新搜索，摘要卡不应凭空出现
-    await userEvent.click(screen.getByText('自动模式'))
+    await waitFor(() => { expect(searchFn).toHaveBeenCalledWith('天气之子', 'movie', true) })
     expect(screen.queryByTestId('intent-summary')).not.toBeInTheDocument()
   })
 

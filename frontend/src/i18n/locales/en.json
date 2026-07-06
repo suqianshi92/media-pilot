@@ -687,6 +687,7 @@
     "downloadSubmitFailed": "Download submission failed",
     "identifyFailed": "Identification failed",
     "identifyRequestFailed": "Identification request failed",
+    "directSearchTip": "Search indexers directly, without AI intent analysis",
     "searchType": {
       "all": "All",
       "movie": "Movies",

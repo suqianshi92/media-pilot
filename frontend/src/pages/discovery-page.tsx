@@ -21,8 +21,6 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
   const { t } = useTranslation()
   const [inputText, setInputText] = useState('')
   const [searchType, setSearchType] = useState('all')
-  const [searchMode, setSearchMode] = useState<'auto' | 'manual'>('auto')
-  const [lastSearchMode, setLastSearchMode] = useState<'auto' | 'manual' | null>(null)
   const [loading, setLoading] = useState(false)
 
   const [intent, setIntent] = useState<ResourceIntent | null>(null)
@@ -145,7 +143,7 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
       audio_tags: new Set(),
     })  // 4.x: 新搜索清空标签筛选
     try {
-      const result = await service.searchResources(text, searchType, searchMode === 'manual')
+      const result = await service.searchResources(text, searchType, true)
       if (result.status === 'error' && result.messages?.[0]) {
         showToast(result.messages[0].text, 'error')
         return
@@ -154,7 +152,6 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
       setCandidates(data.candidates)
       setIntent(data.intent)
       setSearchMessage(data.message)
-      setLastSearchMode(searchMode)
     } catch (e) {
       showToast(e instanceof Error ? e.message : t('discovery.searchFailed'), 'error')
     } finally {
@@ -291,54 +288,39 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
           <label className="flex items-center gap-1 cursor-pointer">
             <input
               type="radio"
-              name="search-mode"
-              value="auto"
-              checked={searchMode === 'auto'}
-              onChange={() => { setSearchMode('auto'); setShowCount(FIRST_SCREEN) }}
+              name="search-type"
+              value="all"
+              checked={searchType === 'all'}
+              onChange={() => { setSearchType('all'); setShowCount(FIRST_SCREEN) }}
               className="accent-primary"
             />
-            {t('discovery.searchMode.auto')}
+            {t('discovery.searchType.all')}
           </label>
           <label className="flex items-center gap-1 cursor-pointer">
             <input
               type="radio"
-              name="search-mode"
-              value="manual"
-              checked={searchMode === 'manual'}
-              onChange={() => { setSearchMode('manual'); setSearchType('all'); setShowCount(FIRST_SCREEN) }}
+              name="search-type"
+              value="movie"
+              checked={searchType === 'movie'}
+              onChange={() => { setSearchType('movie'); setShowCount(FIRST_SCREEN) }}
               className="accent-primary"
             />
-            {t('discovery.searchMode.manual')}
+            {t('discovery.searchType.movie')}
           </label>
-          {searchMode === 'auto' ? (
-            <span className="text-xs text-muted-foreground self-center ml-2">{t('discovery.searchMode.autoTip')}</span>
-          ) : (
-            <span className="text-xs text-muted-foreground self-center ml-2">{t('discovery.searchMode.manualTip')}</span>
-          )}
+          <label className="flex items-center gap-1 cursor-pointer">
+            <input
+              type="radio"
+              name="search-type"
+              value="adult"
+              checked={searchType === 'adult'}
+              onChange={() => { setSearchType('adult'); setShowCount(FIRST_SCREEN) }}
+              className="accent-primary"
+            />
+            {t('discovery.searchType.adult')}
+          </label>
+          <span className="text-xs text-muted-foreground self-center ml-2">{t('discovery.directSearchTip')}</span>
         </div>
       </div>
-
-      {/* LLM 解析摘要 — 仅当本次结果由自动模式搜索得到时显示 */}
-      {intent && lastSearchMode === 'auto' && (
-        <div className="rounded-md border border-border bg-surface px-4 py-3 text-sm" data-testid="intent-summary">
-          <p className="font-medium mb-1">{t('discovery.searchKeywords')}</p>
-          <p className="text-muted-foreground">
-            {intent.resource_keywords.length > 0
-              ? intent.resource_keywords.join('、')
-              : intent.query_text}
-          </p>
-          {intent.reason && (
-            <>
-              <p className="font-medium mt-2 mb-1">{t('discovery.analysisReason')}</p>
-              <p className="text-muted-foreground">{intent.reason}</p>
-            </>
-          )}
-          <p className="mt-2 text-xs text-muted-foreground">
-            {t('discovery.searchTypeLabel')}: {t(`discovery.searchType.${intent.search_type}`)}
-            {intent.profile_hint !== 'unknown' && ` · ${t('discovery.profileHint')}: ${intent.profile_hint}`}
-          </p>
-        </div>
-      )}
 
       {/* 搜索结果 */}
       {searchMessage && (

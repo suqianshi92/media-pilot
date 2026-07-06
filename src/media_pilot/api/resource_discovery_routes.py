@@ -22,9 +22,9 @@ router = APIRouter(prefix="/api/v1/resource-discovery")
 
 
 class ResourceSearchBody(BaseModel):
-    input_text: str = Field(..., min_length=1, description="自然语言搜索输入")
+    input_text: str = Field(..., min_length=1, description="资源查询关键词")
     search_type: str = Field("all", description="搜索类型覆盖: all / movie / adult")
-    skip_intent: bool = Field(False, description="是否跳过 LLM 意图解析，直接用原始关键词搜索")
+    skip_intent: bool = Field(True, description="是否跳过 LLM 意图解析，直接用原始关键词搜索")
 
 
 class ResourceDownloadBody(BaseModel):
@@ -45,7 +45,7 @@ class ResourceDownloadBody(BaseModel):
 
 @router.post("/search")
 def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
-    """自然语言资源搜索 — LLM 必经，不绕过"""
+    """直接资源搜索 — 默认跳过 LLM 意图解析。"""
     config: AppConfig | None = getattr(request.app.state, "config", None)
     if config is None:
         return ApiEnvelope(

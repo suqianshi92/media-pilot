@@ -688,6 +688,7 @@
     "downloadSubmitFailed": "下载提交失败",
     "identifyFailed": "识别失败",
     "identifyRequestFailed": "识别请求失败",
+    "directSearchTip": "直接查询资源索引，不调用 AI 意图分析",
     "searchMode": {
       "auto": "自动模式",
       "manual": "手动模式",
