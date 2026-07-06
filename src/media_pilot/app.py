@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_pilot.api.agent_background_routes import router as agent_background_router
+from media_pilot.api.content_discovery_routes import router as content_discovery_router
 from media_pilot.api.manual_upload_routes import router as manual_upload_router
 from media_pilot.api.resource_discovery_routes import router as resource_discovery_router
 from media_pilot.api.settings_routes import router as settings_router
@@ -201,6 +202,7 @@ def create_app(
     app.include_router(api_v1_router)
     app.include_router(settings_router)
     app.include_router(resource_discovery_router)
+    app.include_router(content_discovery_router)
     app.include_router(manual_upload_router)
     app.include_router(agent_background_router)
 
