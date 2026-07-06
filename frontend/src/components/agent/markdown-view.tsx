@@ -75,8 +75,26 @@ function parseMarkdown(content: string): Block[] {
     if (/^\d+\.\s+/.test(line)) {
       const items: string[] = []
       while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+\.\s+/, ''))
+        const itemLines = [lines[i].replace(/^\d+\.\s+/, '')]
         i += 1
+        while (i < lines.length) {
+          if (/^\d+\.\s+/.test(lines[i])) break
+          if (lines[i].trim() === '') {
+            const nextLine = lines[i + 1] ?? ''
+            if (/^\d+\.\s+/.test(nextLine) || nextLine.trim() === '') {
+              i += 1
+              continue
+            }
+            break
+          }
+          if (/^\s+/.test(lines[i])) {
+            itemLines.push(lines[i].trim())
+            i += 1
+            continue
+          }
+          break
+        }
+        items.push(itemLines.join('\n'))
       }
       blocks.push({ kind: 'ol', lines: items })
       continue
@@ -311,7 +329,14 @@ export function MarkdownView({ content }: MarkdownViewProps) {
           return (
             <ol key={idx} className="list-decimal pl-5 space-y-1">
               {block.lines.map((item, itemIdx) => (
-                <li key={itemIdx}>{renderInline(item)}</li>
+                <li key={itemIdx}>
+                  {item.split('\n').map((line, lineIdx) => (
+                    <Fragment key={lineIdx}>
+                      {lineIdx > 0 ? <br /> : null}
+                      {renderInline(line)}
+                    </Fragment>
+                  ))}
+                </li>
               ))}
             </ol>
           )

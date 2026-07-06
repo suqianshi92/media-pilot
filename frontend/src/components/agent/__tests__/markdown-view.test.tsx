@@ -50,6 +50,27 @@ describe('MarkdownView — 列表', () => {
     expect(lis.length).toBe(2)
     expect(lis[0].textContent).toBe('一')
   })
+
+  it('有序列表条目允许缩进续行, 不拆成多个从 1 开始的列表', () => {
+    const md = [
+      '1. **赴汤蹈火**（2016）',
+      '   - 推荐理由：现代西部片。',
+      '   - 推荐搜索词：赴汤蹈火 2016',
+      '',
+      '1. **边境杀手**（2015）',
+      '   - 推荐理由：冷峻犯罪片。',
+      '   - 推荐搜索词：边境杀手 2015',
+    ].join('\n')
+    const { container } = render(<MarkdownView content={md} />)
+    const orderedLists = container.querySelectorAll('ol')
+    const lis = container.querySelectorAll('li')
+
+    expect(orderedLists.length).toBe(1)
+    expect(lis.length).toBe(2)
+    expect(lis[0].textContent).toContain('赴汤蹈火')
+    expect(lis[0].textContent).toContain('推荐搜索词：赴汤蹈火 2016')
+    expect(lis[1].textContent).toContain('边境杀手')
+  })
 })
 
 describe('MarkdownView — 表格', () => {
