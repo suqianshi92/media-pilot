@@ -49,6 +49,10 @@ def test_build_content_discovery_messages_injects_fixed_system_prompt() -> None:
     ])
 
     assert messages[0] == {"role": "system", "content": CONTENT_DISCOVERY_SYSTEM_PROMPT}
+    system_prompt = messages[0]["content"]
+    assert "中文常用名和英文/原名" in system_prompt
+    assert "优先英文/原名 + 年份" in system_prompt
+    assert "不要使用题材、剧情、人物、战役" in system_prompt
     assert messages[1:] == [
         {"role": "user", "content": "推荐现代西部片"},
         {"role": "assistant", "content": "可以看《赴汤蹈火》。"},
@@ -68,6 +72,7 @@ def test_stream_content_discovery_yields_text_deltas_and_done(tmp_path: Path) ->
     assert llm.messages is not None
     assert llm.messages[0]["role"] == "system"
     assert "不要提供下载站点" in llm.messages[0]["content"]
+    assert "推荐搜索词必须是可直接粘贴到资源搜索框的标题类关键词" in llm.messages[0]["content"]
     assert chunks == [
         'event: delta\ndata: {"text": "1. **荒野猎人**（2015）"}\n\n',
         'event: delta\ndata: {"text": "\\n   - 推荐搜索词：荒野猎人 2015"}\n\n',
