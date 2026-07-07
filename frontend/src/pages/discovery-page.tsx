@@ -13,9 +13,42 @@ import { MarkdownView } from '@/components/agent/markdown-view'
 type TagGroup = 'resolutions' | 'sources' | 'codecs' | 'hdr_tags' | 'audio_tags'
 
 const defaultService = createTaskService()
+const CONTENT_DISCOVERY_SESSION_KEY = 'media-pilot:content-discovery:messages'
 
 interface DiscoveryPageProps {
   service?: TaskService
+}
+
+function loadContentDiscoveryMessages(): ContentDiscoveryMessage[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.sessionStorage.getItem(CONTENT_DISCOVERY_SESSION_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((message): message is ContentDiscoveryMessage => {
+      return (
+        message
+        && (message.role === 'user' || message.role === 'assistant')
+        && typeof message.content === 'string'
+      )
+    })
+  } catch {
+    return []
+  }
+}
+
+function saveContentDiscoveryMessages(messages: ContentDiscoveryMessage[]) {
+  if (typeof window === 'undefined') return
+  try {
+    if (messages.length === 0) {
+      window.sessionStorage.removeItem(CONTENT_DISCOVERY_SESSION_KEY)
+      return
+    }
+    window.sessionStorage.setItem(CONTENT_DISCOVERY_SESSION_KEY, JSON.stringify(messages))
+  } catch {
+    // sessionStorage may be unavailable in private browsing or strict environments.
+  }
 }
 
 export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) {
@@ -548,7 +581,7 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
 
 function ContentDiscoveryPanel({ service }: { service: TaskService }) {
   const { t } = useTranslation()
-  const [messages, setMessages] = useState<ContentDiscoveryMessage[]>([])
+  const [messages, setMessages] = useState<ContentDiscoveryMessage[]>(loadContentDiscoveryMessages)
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -558,6 +591,10 @@ function ContentDiscoveryPanel({ service }: { service: TaskService }) {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+  }, [messages])
+
+  useEffect(() => {
+    saveContentDiscoveryMessages(messages)
   }, [messages])
 
   useEffect(() => {

@@ -87,7 +87,10 @@ function mockService(overrides: Partial<TaskService> = {}): TaskService {
 }
 
 describe('DiscoveryPage', () => {
-  beforeEach(() => { vi.clearAllMocks() })
+  beforeEach(() => {
+    vi.clearAllMocks()
+    window.sessionStorage.clear()
+  })
 
   it('renders candidate cards with download button', async () => {
     const searchFn = vi.fn().mockResolvedValue(
@@ -287,6 +290,24 @@ describe('DiscoveryPage', () => {
     ])
   })
 
+  it('restores content discovery session after page remount', async () => {
+    const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
+      onDelta('1. **桂河大桥 / The Bridge on the River Kwai**（1957）')
+    })
+    const svc = mockService({ streamContentDiscovery } as Partial<TaskService>)
+
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+    await userEvent.type(screen.getByTestId('content-discovery-input'), '推荐二战电影')
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => { expect(screen.getByText(/The Bridge on the River Kwai/)).toBeInTheDocument() })
+
+    cleanup()
+
+    render(<ToastProvider><MemoryRouter initialEntries={['/discovery']}><Routes><Route path="/discovery" element={<DiscoveryPage service={svc} />} /></Routes></MemoryRouter></ToastProvider>)
+    expect(screen.getByText('推荐二战电影')).toBeInTheDocument()
+    expect(screen.getByText(/The Bridge on the River Kwai/)).toBeInTheDocument()
+  })
+
   it('clears content discovery session', async () => {
     const streamContentDiscovery = vi.fn(async (_messages, onDelta) => {
       onDelta('1. **边境杀手**（2015）')
@@ -301,6 +322,7 @@ describe('DiscoveryPage', () => {
     await userEvent.click(screen.getByRole('button', { name: '新会话' }))
     expect(screen.queryByText('边境杀手')).not.toBeInTheDocument()
     expect(screen.getByTestId('content-discovery-empty')).toBeInTheDocument()
+    expect(window.sessionStorage.getItem('media-pilot:content-discovery:messages')).toBeNull()
   })
 
 
