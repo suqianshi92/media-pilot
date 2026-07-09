@@ -117,11 +117,11 @@ describe('TaskDetailPage', () => {
     expect(screen.getByText('选择置信度')).toBeInTheDocument()
     expect(screen.getByText('/data/workspace/你的名字/BDMV')).toBeInTheDocument()
     expect(screen.getAllByText('尚未选择').length).toBeGreaterThan(0)
-    expect(screen.getByText('检测到 BDMV 目录')).toBeInTheDocument()
+    expect(screen.getByText('自动识别 BDMV 电影目录')).toBeInTheDocument()
     expect(screen.getByText('1.00')).toBeInTheDocument()
     expect(screen.getByText('候选文件')).toBeInTheDocument()
     expect(screen.getByText('排除文件')).toBeInTheDocument()
-    expect(screen.getByText('BDMV 需要人工处理')).toBeInTheDocument()
+    expect(screen.getByText('BDMV 目录已支持')).toBeInTheDocument()
   })
 
   it('renders the completed hero and metadata sections for a completed task', async () => {

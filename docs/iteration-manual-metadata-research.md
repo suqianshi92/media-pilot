@@ -20,7 +20,7 @@
 
 ## 非目标
 
-- 不实现 BDMV/ISO 入库。
+- 不实现 ISO/IMG 入库；BDMV 电影目录后来已由独立迭代支持，当前状态以 `docs/bdmv-movie-ingest-plan.md` 为准。
 - 不重构源文件清理状态机；`source_cleanup_policy=trash` 与只读挂载的历史问题另行处理。
 - 不新增强制成人番号识别 helper 来决定媒体类型或 provider。
 - 不实现跨 provider 搜索策略框架，例如 `search_failed_on_provider -> try alternative provider / ask user`。
@@ -35,7 +35,7 @@
 | `agent_failed` | 清除失败态，保存新候选与元数据详情，然后尝试确定性发布。 |
 | `waiting_user / select_metadata_candidate` | 将旧候选决策视为被人工覆盖，保存新选择并继续确定性发布。 |
 | `waiting_user / target_conflict` | 作废旧目标冲突决策，按新元数据重新计算发布目标；如仍冲突，再创建新的目标冲突决策。 |
-| `waiting_user / review_complex_input` | 允许保存新元数据，但不能绕过复杂输入或 BDMV 门禁。 |
+| `waiting_user / review_complex_input` | 允许保存新元数据，但不能绕过复杂输入门禁；BDMV 电影目录不再因自身结构进入该门禁。 |
 | `library_import_complete` | 先执行撤回入库，删除旧发布产物，再用新元数据重新入库。 |
 | `agent_running` | 暂不允许，返回明确错误，提示等待 Agent 完成或使用卡住恢复。 |
 | `deleted` | 不允许。 |

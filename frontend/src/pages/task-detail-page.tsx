@@ -9,7 +9,6 @@ import {
   ErrorState,
   InlineMessage,
   MessageCallout,
-  RiskCallout,
   SkeletonBlock,
   StatusBadge,
 } from '@/components/app/shared-ui'
@@ -191,7 +190,7 @@ function SourceSelectionSection({ sourceSelection, blockedReason }: { sourceSele
         <p className="text-sm text-muted-foreground">{t('taskWorkspace.sourceSelectionDesc')}</p>
       </div>
       {blockedReason === 'bdmv_detected' || sourceSelection.bdmv_detected ? (
-        <RiskCallout title={t('taskWorkspace.bdmvNeedManual')} description={t('taskWorkspace.bdmvWarning')} />
+        <MessageCallout title={t('taskWorkspace.bdmvSupported')} description={t('taskWorkspace.bdmvWarning')} />
       ) : null}
       <dl className="grid gap-3 md:grid-cols-2">
         <DetailItem label={t('taskWorkspace.inputPath')} value={sourceSelection.input_path} />

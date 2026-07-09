@@ -117,6 +117,7 @@ const sourceSelectionReasonLabelFallback: Record<string, string> = {
   multiple_similar_videos: '存在多个相似视频',
   no_supported_video: '未找到支持的视频文件',
   bdmv_detected: '检测到 BDMV 目录',
+  auto_bdmv_movie_dir: '自动识别 BDMV 电影目录',
 }
 
 const writeResultStatusLabelFallback: Record<WriteResultDto['status'], string> = {
