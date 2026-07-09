@@ -53,6 +53,10 @@ def test_build_content_discovery_messages_injects_fixed_system_prompt() -> None:
     assert "中文常用名和英文/原名" in system_prompt
     assert "优先英文/原名 + 年份" in system_prompt
     assert "不要使用题材、剧情、人物、战役" in system_prompt
+    assert "resource_search_keywords" in system_prompt
+    assert "普通电影优先英文原名或常见发行名" in system_prompt
+    assert "中文用户搜索英文电影时仍用英文原名，不要翻译成中文" in system_prompt
+    assert "不确定英文名或原名时不要编造" in system_prompt
     assert messages[1:] == [
         {"role": "user", "content": "推荐现代西部片"},
         {"role": "assistant", "content": "可以看《赴汤蹈火》。"},
