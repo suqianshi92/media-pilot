@@ -455,14 +455,19 @@ function makeToolCall(name: string, args: any = {}) {
   }
 }
 
-function makeToolDetail(name: string, output: Record<string, unknown>, input: Record<string, unknown> = {}) {
+function makeToolDetail(
+  name: string,
+  output: Record<string, unknown> | null,
+  input: Record<string, unknown> = {},
+  status: string = 'succeeded'
+) {
   return {
     id: `detail-${name}`,
     run_id: 'run-1',
     message_id: 'msg-1',
     tool_call_id: `tc-${name}`,
     tool_name: name,
-    status: 'succeeded',
+    status,
     input,
     output,
     error_message: null,
@@ -518,6 +523,24 @@ describe('MessageBubble — ToolCallBlock 默认折叠', () => {
     expect(summary).toHaveTextContent('源文件按策略保留')
     expect(summary.textContent).not.toContain('policy')
     expect(summary.textContent).not.toContain('task-1')
+  })
+
+  it('执行中的工具显示 "执行中", 不误标为失败', () => {
+    const toolDetail = makeToolDetail(
+      'handle_source_cleanup',
+      null,
+      { task_id: 'task-1' },
+      'running'
+    )
+    const msg = makeAssistantMsg('发布成功, 正在清理源文件.', [
+      makeToolCall('handle_source_cleanup', { task_id: 'task-1' }),
+    ])
+
+    renderWithI18n(<MessageBubble msg={msg} toolDetails={[toolDetail]} />)
+
+    const status = screen.getByTestId('tool-call-status-handle_source_cleanup')
+    expect(status).toHaveTextContent('执行中')
+    expect(status).not.toHaveTextContent('失败')
   })
 
   it('模拟用户点击 ToolCallBlock → 出现 input/output JSON', async () => {

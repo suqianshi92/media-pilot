@@ -112,26 +112,48 @@ function formatDuration(ms: number | null) {
   return `${(ms / 1000).toFixed(1)} s`
 }
 
+type ToolCallDisplayStatus = 'success' | 'failed' | 'running' | 'pending' | 'unknown'
+
 /**
- * 工具调用是否成功 — 多来源判定, 防止 UI 把成功误标为失败:
+ * 工具调用展示状态 — 多来源判定, 防止 UI 把中间态误标为失败:
  * - API 已归一化为 "succeeded" / "failed" (见 /agent-tool-calls),
  *   但 DB 历史可能含 "completed" (runner 新写入).
  * - 某些工具的 wire output 用 {status: "success" | "failure"} 描述,
  *   也作为兜底.
  */
-function isToolCallSuccessful(toolDetail: AgentToolCallDto | undefined): boolean {
-  if (!toolDetail) return false
+function getToolCallDisplayStatus(toolDetail: AgentToolCallDto | undefined): ToolCallDisplayStatus {
+  if (!toolDetail) return 'unknown'
   const wireStatus = (toolDetail.status || '').toLowerCase()
-  if (wireStatus === 'succeeded' || wireStatus === 'completed') return true
-  if (wireStatus === 'failed' || wireStatus === 'failure' || wireStatus === 'error') return false
+  if (wireStatus === 'succeeded' || wireStatus === 'completed') return 'success'
+  if (wireStatus === 'failed' || wireStatus === 'failure' || wireStatus === 'error') return 'failed'
   const output = toolDetail.output
   if (output && typeof output === 'object') {
     const dataStatus = (output as Record<string, unknown>).status
     if (typeof dataStatus === 'string' && dataStatus.toLowerCase() === 'success') {
-      return true
+      return 'success'
+    }
+    if (typeof dataStatus === 'string' && ['failure', 'failed', 'error'].includes(dataStatus.toLowerCase())) {
+      return 'failed'
     }
   }
-  return false
+  if (wireStatus === 'running') return 'running'
+  if (wireStatus === 'pending' || wireStatus === 'skipped') return 'pending'
+  return 'unknown'
+}
+
+function getToolCallStatusClass(status: ToolCallDisplayStatus): string {
+  if (status === 'success') return 'text-green-500'
+  if (status === 'failed') return 'text-red-500'
+  if (status === 'running') return 'text-blue-500'
+  return 'text-muted-foreground'
+}
+
+function getToolCallStatusLabel(t: TFunction, status: ToolCallDisplayStatus): string {
+  if (status === 'success') return t('agent.toolSuccess')
+  if (status === 'failed') return t('agent.toolFailed')
+  if (status === 'running') return t('agent.toolRunning')
+  if (status === 'pending') return t('agent.toolPending')
+  return t('agent.toolUnknown')
 }
 
 const toolLabelKeyMap: Record<string, string> = {
@@ -296,6 +318,7 @@ export function ToolCallBlock({
   const collapsedSummary = toolDetail
     ? summarizeToolOutput(funcName, toolDetail.output, toolDetail.input, t)
     : ''
+  const displayStatus = getToolCallDisplayStatus(toolDetail)
 
   return (
     <div className="mt-2 rounded border border-border/70 bg-background">
@@ -317,9 +340,9 @@ export function ToolCallBlock({
         {toolDetail ? (
           <span
             data-testid={`tool-call-status-${funcName}`}
-            className={`ml-auto text-xs ${isToolCallSuccessful(toolDetail) ? 'text-green-500' : 'text-red-500'}`}
+            className={`ml-auto text-xs ${getToolCallStatusClass(displayStatus)}`}
           >
-            {isToolCallSuccessful(toolDetail) ? t('agent.toolSuccess') : t('agent.toolFailed')}
+            {getToolCallStatusLabel(t, displayStatus)}
           </span>
         ) : null}
         {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground shrink-0" /> : <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />}
