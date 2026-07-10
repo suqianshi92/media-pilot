@@ -249,6 +249,8 @@ class DownloadSyncService:
         ingest_repo = IngestTaskRepository(session)
         ingest_task = ingest_repo.create(
             IngestTaskCreate(
+                owner_user_id=task.owner_user_id,
+                is_adult=task.is_adult,
                 source_path=content_path,
                 source_download_task_id=task.id,
                 status="discovered",

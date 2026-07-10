@@ -10,6 +10,7 @@ from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.config.settings import AppConfig
 from media_pilot.repository.database import create_session_factory, initialize_database
+from media_pilot.repository.repositories import DownloadTaskRepository
 
 
 def _make_config(**overrides) -> AppConfig:
@@ -269,6 +270,13 @@ class TestSubmitEndpoint:
         rbody = resp.json()
         assert rbody["data"]["results"][0]["success"] is True
         assert rbody["status"] == "success"
+        task_id = rbody["data"]["results"][0]["download_task_id"]
+        current_user_id = client.get("/api/v1/auth/me").json()["data"]["user"]["id"]
+        with client.app.state.session_factory() as session:
+            task = DownloadTaskRepository(session).get(task_id)
+        assert task is not None
+        assert task.owner_user_id == current_user_id
+        assert task.is_adult is False
 
     def test_submit_empty_items_rejected(self, client: TestClient):
         resp = client.post("/api/v1/manual-upload/submit", json={"items": []})
@@ -292,9 +300,9 @@ class TestSubmitEndpoint:
                     "kind": "magnet",
                     "magnet_uri": "magnet:?xt=urn:btih:abc123&dn=Test",
                     "display_name": "Test",
-                    "preselected_profile": "tmdb_movie",
-                    "preselected_provider": "tmdb",
-                    "preselected_external_id": "tt1234567",
+                    "preselected_profile": "tpdb_adult_movie",
+                    "preselected_provider": "tpdb",
+                    "preselected_external_id": "adult:1234567",
                 }
             ]
         }
@@ -302,3 +310,8 @@ class TestSubmitEndpoint:
         assert resp.status_code == 200
         rbody = resp.json()
         assert rbody["data"]["results"][0]["success"] is True
+        task_id = rbody["data"]["results"][0]["download_task_id"]
+        with client.app.state.session_factory() as session:
+            task = DownloadTaskRepository(session).get(task_id)
+        assert task is not None
+        assert task.is_adult is True

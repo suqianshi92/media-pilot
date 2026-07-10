@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_pilot.api.auth_dependencies import CurrentAuthDep
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
 from media_pilot.config import AppConfig
 from media_pilot.services.resource_discovery import search_resources, submit_download
@@ -107,7 +108,11 @@ def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
 
 
 @router.post("/download")
-def download(body: ResourceDownloadBody, request: Request) -> ApiEnvelope[dict]:
+def download(
+    body: ResourceDownloadBody,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
     """提交下载到 qBittorrent — 保存路径来自后端配置"""
     config: AppConfig | None = getattr(request.app.state, "config", None)
     if config is None:
@@ -132,6 +137,7 @@ def download(body: ResourceDownloadBody, request: Request) -> ApiEnvelope[dict]:
         preselected_profile=body.preselected_profile,
         preselected_provider=body.preselected_provider,
         preselected_external_id=body.preselected_external_id,
+        owner_user_id=auth.user.id,
     )
 
     if result["status"] == "error":

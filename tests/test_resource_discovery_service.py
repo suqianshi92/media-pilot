@@ -484,7 +484,10 @@ class TestDownloadService:
             title="测试资源", indexer="TGx", source="prowlarr",
             download_url="https://example.com/t.torrent", seeders=10,
         )
-        token = _store_candidate(candidate)
+        token = _store_candidate(
+            candidate,
+            intent_context={"search_type": "adult"},
+        )
 
         mock_adapter = MagicMock()
         mock_adapter.add_download.return_value = DownloadSubmitResult(
@@ -495,7 +498,12 @@ class TestDownloadService:
 
         cfg = _make_config()
         # 默认 _make_config 未设 qbittorrent_save_path，使用 AppConfig 默认值
-        result = submit_download(cfg, candidate_token=token, session_factory=sf)
+        result = submit_download(
+            cfg,
+            candidate_token=token,
+            session_factory=sf,
+            owner_user_id="user-1",
+        )
 
         assert result["status"] == "success"
         assert "download_task_id" in result["data"]
@@ -512,6 +520,8 @@ class TestDownloadService:
             assert task.indexer == "TGx"
             assert task.qb_hash == "deadbeef1234"
             assert task.status == "submitted"
+            assert task.owner_user_id == "user-1"
+            assert task.is_adult is True
 
     @patch("media_pilot.services.resource_discovery.QBittorrentAdapter")
     def test_submit_failure_does_not_create_task(self, mock_qb_cls):

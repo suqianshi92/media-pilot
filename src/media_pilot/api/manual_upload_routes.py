@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import re
-from io import BytesIO
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_pilot.accounts.task_classification import is_adult_metadata_selection
+from media_pilot.api.auth_dependencies import CurrentAuthDep
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
 from media_pilot.config import AppConfig
 from media_pilot.repository.repositories import (
@@ -188,6 +189,7 @@ def parse_upload(
 def submit_uploads(
     body: SubmitBody,
     request: Request,
+    auth: CurrentAuthDep,
 ) -> ApiEnvelope[SubmitResult]:
     """将待导入条目提交为正式下载任务。"""
     config: AppConfig | None = getattr(request.app.state, "config", None)
@@ -208,7 +210,13 @@ def submit_uploads(
 
     for item in body.items:
         try:
-            result = _submit_one(item, config, adapter, session_factory)
+            result = _submit_one(
+                item,
+                config,
+                adapter,
+                session_factory,
+                owner_user_id=auth.user.id,
+            )
             results.append(result)
         except Exception as exc:
             results.append(SubmitItemResult(
@@ -235,6 +243,8 @@ def _submit_one(
     config: AppConfig,
     adapter: QBittorrentAdapter,
     session_factory: sessionmaker[Session] | None,
+    *,
+    owner_user_id: str,
 ) -> SubmitItemResult:
     """提交单个条目：创建 DownloadTask → 提交给 qB → 更新状态。"""
     title = item.display_name or item.key
@@ -242,7 +252,13 @@ def _submit_one(
 
     if session_factory is not None:
         with session_factory() as session:
-            sid = _create_download_task(session, item, config, title)
+            sid = _create_download_task(
+                session,
+                item,
+                config,
+                title,
+                owner_user_id=owner_user_id,
+            )
             if sid is None:
                 return SubmitItemResult(key=item.key, success=False, message="创建下载任务失败")
 
@@ -294,11 +310,18 @@ def _create_download_task(
     item: SubmitItem,
     config: AppConfig,
     title: str,
+    *,
+    owner_user_id: str,
 ) -> str | None:
     """在数据库中创建 DownloadTask 记录并返回其 ID。"""
     try:
         repo = DownloadTaskRepository(session)
         task = repo.create(DownloadTaskCreate(
+            owner_user_id=owner_user_id,
+            is_adult=is_adult_metadata_selection(
+                profile=item.preselected_profile,
+                provider=item.preselected_provider,
+            ),
             title=title,
             source="manual_upload",
             save_path=str(config.qbittorrent_save_path),

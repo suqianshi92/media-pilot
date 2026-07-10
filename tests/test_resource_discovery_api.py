@@ -5,11 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from tests.auth_helpers import AuthenticatedTestClient as TestClient
-
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig
 from media_pilot.resource_discovery.types import ResourceCandidate, ResourceSearchResult
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 
 def _make_config(tmp_path: Path) -> AppConfig:
@@ -93,3 +92,33 @@ def test_resource_search_accepts_show_type(tmp_path: Path, monkeypatch) -> None:
     req = adapter.search.call_args.args[0]
     assert req.query == "Breaking Bad"
     assert req.search_type == "show"
+
+
+def test_resource_download_uses_authenticated_user_as_task_owner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_submit_download(_config, **kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "success",
+            "data": {"download_task_id": "download-1"},
+            "message": "submitted",
+        }
+
+    monkeypatch.setattr(
+        "media_pilot.api.resource_discovery_routes.submit_download",
+        fake_submit_download,
+    )
+    client = TestClient(create_app(config=_make_config(tmp_path)))
+    current_user_id = client.get("/api/v1/auth/me").json()["data"]["user"]["id"]
+
+    response = client.post(
+        "/api/v1/resource-discovery/download",
+        json={"candidate_token": "candidate-1"},
+    )
+
+    assert response.status_code == 200
+    assert captured["owner_user_id"] == current_user_id

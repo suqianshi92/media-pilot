@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+from media_pilot.accounts.task_classification import is_adult_metadata_selection
 from media_pilot.config.settings import AppConfig
 from media_pilot.resource_discovery.intent_parser import IntentParseError, ResourceIntentParser
 from media_pilot.resource_discovery.prowlarr_adapter import ProwlarrAdapter
@@ -148,7 +149,11 @@ def search_resources(
         "preferred_hdr_tags": intent.preferred_hdr_tags,
         "preferred_audio_tags": intent.preferred_audio_tags,
     }
-    intent_context = {"user_input": user_input, "intent": intent_dict_for_cache}
+    intent_context = {
+        "user_input": user_input,
+        "search_type": search_type,
+        "intent": intent_dict_for_cache,
+    }
     candidates = [
         _candidate_for_response(c, intent_context=intent_context) for c in ranked
     ]
@@ -193,6 +198,7 @@ def submit_download(
     preselected_profile: str | None = None,
     preselected_provider: str | None = None,
     preselected_external_id: str | None = None,
+    owner_user_id: str | None = None,
 ) -> dict:
     """提交下载到 qBittorrent，成功后创建持久化下载任务。
 
@@ -214,6 +220,13 @@ def submit_download(
     candidate_title = cached.title
     candidate_source = cached.source
     candidate_indexer = cached.indexer
+    cached_search_type = _ctx.get("search_type") or _ctx.get("intent", {}).get(
+        "search_type"
+    )
+    is_adult = cached_search_type == "adult" or is_adult_metadata_selection(
+        profile=preselected_profile,
+        provider=preselected_provider,
+    )
 
     url_to_add = download_url or magnet_url
     if not url_to_add:
@@ -240,6 +253,8 @@ def submit_download(
             repo = DownloadTaskRepository(session)
             task = repo.create(
                 DownloadTaskCreate(
+                    owner_user_id=owner_user_id,
+                    is_adult=is_adult,
                     title=candidate_title,
                     source=candidate_source,
                     save_path=config.qbittorrent_save_path,

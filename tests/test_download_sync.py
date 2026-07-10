@@ -772,8 +772,14 @@ class TestDownloadCompletionToIngest:
         from media_pilot.services.download_sync import DownloadSyncService
 
         repo = DownloadTaskRepository(session)
-        tid = _create_task(repo, qb_hash="hash666", status="downloading",
-                           title="Test.Movie.2024.mkv")
+        tid = _create_task(
+            repo,
+            qb_hash="hash666",
+            status="downloading",
+            title="Test.Movie.2024.mkv",
+            owner_user_id="user-1",
+            is_adult=True,
+        )
         session.commit()
 
         config = _make_config()
@@ -810,6 +816,8 @@ class TestDownloadCompletionToIngest:
         assert ingest.source_download_task_id == tid
         assert ingest.status == "discovered"
         assert ingest.current_step == "download_scan"
+        assert ingest.owner_user_id == "user-1"
+        assert ingest.is_adult is True
 
     def test_directory_complete_creates_ingest(self, session: Session) -> None:
         """目录下载完成 → 创建 IngestTask，交给现有入库链路"""
