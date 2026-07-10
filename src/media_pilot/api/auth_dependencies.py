@@ -13,6 +13,7 @@ from media_pilot.accounts.cookies import (
     set_session_cookie,
 )
 from media_pilot.accounts.session_service import SessionService
+from media_pilot.accounts.task_access import TaskAccessScope
 from media_pilot.repository.account_repositories import UserRepository
 from media_pilot.repository.models import AccountSession, User
 
@@ -87,3 +88,14 @@ def get_current_admin(auth: CurrentAuthDep) -> AuthContext:
 
 
 CurrentAdminDep = Annotated[AuthContext, Depends(get_current_admin)]
+
+
+def get_task_access_scope(auth: CurrentAuthDep) -> TaskAccessScope:
+    return TaskAccessScope(
+        user_id=auth.user.id,
+        can_view_all_tasks=auth.user.role == "admin",
+        can_access_adult=auth.user.role == "admin" or auth.user.can_access_adult,
+    )
+
+
+TaskAccessDep = Annotated[TaskAccessScope, Depends(get_task_access_scope)]

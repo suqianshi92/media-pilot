@@ -8,11 +8,13 @@ from pathlib import Path
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from media_pilot.accounts.task_access import TaskAccessScope
 from media_pilot.api.task_dtos import (
     AgentStatusSummary,
     AuditLogDto,
     ConfidenceLevel,
     DownloadTaskSummary,
+    EpisodeMappingDto,
     FileAssetDto,
     MediaSourceCandidateFile,
     MediaSourceSelectionDto,
@@ -27,7 +29,6 @@ from media_pilot.api.task_dtos import (
     TaskStatusSummary,
     TaskSummary,
     TimelineEventDto,
-    EpisodeMappingDto,
     WritePlanDto,
     WriteResultDto,
 )
@@ -49,6 +50,7 @@ from media_pilot.repository.models import (
     WritePlan,
     WriteResult,
 )
+from media_pilot.repository.repositories import DownloadTaskRepository
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +271,8 @@ def _build_agent_status_index(
 def map_to_task_summaries(
     session: Session,
     tasks: list[IngestTask],
+    *,
+    access_scope: TaskAccessScope | None = None,
 ) -> list[TaskSummary]:
     """将 IngestTask 列表映射为 TaskSummary DTO 列表"""
     if not tasks:
@@ -314,7 +318,13 @@ def map_to_task_summaries(
         # 下载任务信息（当入库任务来自下载时）
         download_summary = None
         if task.source_download_task_id:
-            dl_task = session.get(DownloadTask, task.source_download_task_id)
+            if access_scope is None:
+                dl_task = session.get(DownloadTask, task.source_download_task_id)
+            else:
+                dl_task = DownloadTaskRepository(session).get_authorized(
+                    task.source_download_task_id,
+                    access_scope,
+                )
             if dl_task is not None:
                 download_summary = map_download_task_to_summary(dl_task)
 

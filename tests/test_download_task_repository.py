@@ -53,6 +53,20 @@ class TestDownloadTaskModel:
         assert task.preselected_metadata_provider == "tmdb"
         assert task.preselected_metadata_external_id == "12345"
 
+    def test_create_with_owner_and_adult_classification(self, session: Session) -> None:
+        task = DownloadTaskRepository(session).create(
+            DownloadTaskCreate(
+                title="Adult Movie",
+                source="prowlarr",
+                save_path="/data/downloads/adult",
+                owner_user_id="user-1",
+                is_adult=True,
+            )
+        )
+
+        assert task.owner_user_id == "user-1"
+        assert task.is_adult is True
+
 
 class TestDownloadTaskRepository:
     def test_get_by_id(self, session: Session) -> None:

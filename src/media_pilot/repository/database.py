@@ -108,6 +108,26 @@ def initialize_database(config: AppConfig) -> Path | str:
 def _ensure_lightweight_columns(conn) -> None:
     # 简单迁移：为已有数据库补充缺失列。项目未引入 Alembic，这里只做
     # 向后兼容的 ADD COLUMN，不处理复杂数据迁移。
+    _ensure_column(conn, "ingest_tasks", "owner_user_id", "TEXT")
+    _ensure_column(
+        conn, "ingest_tasks", "is_adult", "BOOLEAN NOT NULL DEFAULT false"
+    )
+    _ensure_column(conn, "download_tasks", "owner_user_id", "TEXT")
+    _ensure_column(
+        conn, "download_tasks", "is_adult", "BOOLEAN NOT NULL DEFAULT false"
+    )
+    _ensure_index(
+        conn,
+        "ix_ingest_tasks_owner_user_id",
+        "CREATE INDEX IF NOT EXISTS ix_ingest_tasks_owner_user_id "
+        "ON ingest_tasks (owner_user_id)",
+    )
+    _ensure_index(
+        conn,
+        "ix_download_tasks_owner_user_id",
+        "CREATE INDEX IF NOT EXISTS ix_download_tasks_owner_user_id "
+        "ON download_tasks (owner_user_id)",
+    )
     _ensure_column(conn, "ingest_tasks", "source_download_task_id", "TEXT")
     _ensure_column(conn, "download_tasks", "ingest_task_id", "TEXT")
     _ensure_column(conn, "app_settings", "preferred_metadata_language", "TEXT")

@@ -6,10 +6,11 @@ from media_pilot.config import AppConfig
 from media_pilot.repository.database import (
     Base,
     create_engine_from_config,
+    create_session_factory,
     database_url_from_config,
     initialize_database,
 )
-from media_pilot.repository.models import IngestTask
+from media_pilot.repository.models import DownloadTask, IngestTask
 
 
 def make_config(database_dir: Path) -> AppConfig:
@@ -91,6 +92,65 @@ def test_initialize_database_adds_account_tables_without_changing_existing_tasks
             ).scalar_one()
         assert {"users", "account_sessions"} <= tables
         assert legacy_status == "discovered"
+    finally:
+        engine.dispose()
+
+
+def test_initialize_database_adds_task_access_columns_without_assigning_owner(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    initialize_database(config)
+    with create_session_factory(config)() as session:
+        session.add(IngestTask(
+            id="legacy-ingest",
+            source_path="/data/watch/legacy.mkv",
+            status="discovered",
+        ))
+        session.add(DownloadTask(
+            id="legacy-download",
+            title="legacy.mkv",
+            source="prowlarr",
+            save_path="/data/downloads",
+            status="completed",
+        ))
+        session.commit()
+    engine = create_engine_from_config(config)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX ix_ingest_tasks_owner_user_id"))
+            connection.execute(text("DROP INDEX ix_download_tasks_owner_user_id"))
+            connection.execute(text("ALTER TABLE ingest_tasks DROP COLUMN owner_user_id"))
+            connection.execute(text("ALTER TABLE ingest_tasks DROP COLUMN is_adult"))
+            connection.execute(text("ALTER TABLE download_tasks DROP COLUMN owner_user_id"))
+            connection.execute(text("ALTER TABLE download_tasks DROP COLUMN is_adult"))
+        initialize_database(config)
+
+        with engine.connect() as connection:
+            ingest = connection.execute(text("""
+                SELECT owner_user_id, is_adult
+                FROM ingest_tasks WHERE id = 'legacy-ingest'
+            """)).one()
+            download = connection.execute(text("""
+                SELECT owner_user_id, is_adult
+                FROM download_tasks WHERE id = 'legacy-download'
+            """)).one()
+            indexes = {
+                row[1]
+                for table in ("ingest_tasks", "download_tasks")
+                for row in connection.execute(
+                    text(f"PRAGMA index_list({table})")
+                ).fetchall()
+            }
+
+        assert ingest.owner_user_id is None
+        assert download.owner_user_id is None
+        assert ingest.is_adult == 0
+        assert download.is_adult == 0
+        assert {
+            "ix_ingest_tasks_owner_user_id",
+            "ix_download_tasks_owner_user_id",
+        } <= indexes
     finally:
         engine.dispose()
 

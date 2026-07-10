@@ -54,6 +54,14 @@ def test_ingest_task_has_portable_core_columns() -> None:
     assert columns.created_at.type.python_type.__name__ == "datetime"
 
 
+def test_tasks_persist_nullable_owner_and_adult_classification() -> None:
+    for model in (IngestTask, DownloadTask):
+        columns = inspect(model).columns
+        assert columns.owner_user_id.nullable is True
+        assert columns.is_adult.nullable is False
+        assert columns.is_adult.default.arg is False
+
+
 def test_related_models_include_task_links_and_json_payloads() -> None:
     assert inspect(MediaCandidate).columns.task_id.type.python_type is str
     assert inspect(MediaSourceSelection).columns.task_id.type.python_type is str

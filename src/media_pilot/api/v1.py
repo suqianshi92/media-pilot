@@ -5,10 +5,11 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from sqlalchemy import desc, select
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_pilot.api.auth_dependencies import TaskAccessDep
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
 from media_pilot.api.task_dtos import (
     DownloadDetailDto,
@@ -152,6 +153,7 @@ _LIST_STATUS_FILTERS = frozenset({
 @router.get("/tasks")
 def list_tasks(
     request: Request,
+    access_scope: TaskAccessDep,
     status: str | None = Query(
         default=None,
         description="按状态筛选，按任务状态过滤；不传则返回全部",
@@ -186,10 +188,13 @@ def list_tasks(
         repository = IngestTaskRepository(session)
 
         if status is not None and status in _LIST_STATUS_FILTERS:
-            total = repository.count(status=status)
+            total = repository.count(status=status, access_scope=access_scope)
             offset = (page - 1) * page_size
             tasks = repository.list_page(
-                status=status, limit=page_size, offset=offset,
+                status=status,
+                limit=page_size,
+                offset=offset,
+                access_scope=access_scope,
             )
         else:
             if status is not None:
@@ -205,13 +210,20 @@ def list_tasks(
                     ],
                     meta={},
                 )
-            total = repository.count()
+            total = repository.count(access_scope=access_scope)
             offset = (page - 1) * page_size
             tasks = repository.list_page(
-                status=None, limit=page_size, offset=offset,
+                status=None,
+                limit=page_size,
+                offset=offset,
+                access_scope=access_scope,
             )
 
-        task_summaries = map_to_task_summaries(session, tasks)
+        task_summaries = map_to_task_summaries(
+            session,
+            tasks,
+            access_scope=access_scope,
+        )
 
     return ApiEnvelope(
         status="success",
@@ -229,6 +241,7 @@ def list_tasks(
 @router.get("/downloads")
 def list_downloads(
     request: Request,
+    access_scope: TaskAccessDep,
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=50, ge=1, le=200, alias="page_size", description="每页条数"),
 ) -> ApiEnvelope[dict]:
@@ -255,13 +268,11 @@ def list_downloads(
         repo = DownloadTaskRepository(session)
         # 返回非终态 + 最近 50 个已完成任务
 
-        non_terminal = repo.list_non_terminal()
-        terminal = list(session.scalars(
-            select(DownloadTask)
-            .where(DownloadTask.status.in_(["completed", "failed"]))
-            .order_by(desc(DownloadTask.updated_at))
-            .limit(50)
-        ))
+        non_terminal = repo.list_non_terminal(access_scope=access_scope)
+        terminal = repo.list_recent_terminal(
+            limit=50,
+            access_scope=access_scope,
+        )
         all_downloads = non_terminal + terminal
         all_downloads.sort(key=lambda t: t.updated_at, reverse=True)
         total = len(all_downloads)
@@ -287,6 +298,7 @@ def list_downloads(
 @router.get("/flows")
 def list_flows(
     request: Request,
+    access_scope: TaskAccessDep,
     filter: str | None = Query(default="all", description="状态筛选"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=50, ge=1, le=200, alias="page_size", description="每页条数"),
@@ -330,6 +342,7 @@ def list_flows(
     with session_factory() as session:
         items, total = build_flows(
             session,
+            access_scope=access_scope,
             filter_name=filter_name,
             page=page,
             page_size=page_size,

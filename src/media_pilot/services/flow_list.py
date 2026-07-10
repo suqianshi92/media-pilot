@@ -10,11 +10,10 @@
 from __future__ import annotations
 
 import functools
-from datetime import datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from media_pilot.accounts.task_access import TaskAccessScope
 from media_pilot.api.task_dtos import (
     AgentStatusSummary,
     DownloadTaskSummary,
@@ -27,8 +26,10 @@ from media_pilot.api.task_mapper import (
     map_download_task_to_summary,
     map_to_task_summaries,
 )
-from media_pilot.repository.models import DownloadTask
-from media_pilot.repository.repositories import IngestTaskRepository
+from media_pilot.repository.repositories import (
+    DownloadTaskRepository,
+    IngestTaskRepository,
+)
 
 # ── attention priority 状态分组 (design Decision 4) ──
 # 与前端 `flow-attention-sort` helper 同源, 后端负责统一排序.
@@ -181,6 +182,7 @@ def _download_only_flow(dl: DownloadTaskSummary) -> FlowSummary:
 def build_flows(
     session: Session,
     *,
+    access_scope: TaskAccessScope,
     filter_name: str | None = None,
     page: int = 1,
     page_size: int = 50,
@@ -191,14 +193,20 @@ def build_flows(
     """
 
     # 1) ingest: 全量查 IngestTask → TaskSummary (内部已关联 download_task 摘要)
-    ingest_rows = IngestTaskRepository(session).list()
-    ingest_summaries = map_to_task_summaries(session, ingest_rows)
+    ingest_rows = IngestTaskRepository(session).list(access_scope=access_scope)
+    ingest_summaries = map_to_task_summaries(
+        session,
+        ingest_rows,
+        access_scope=access_scope,
+    )
     ingest_flows = [_ingest_summary_to_flow(t) for t in ingest_summaries]
 
     # 2) download: 全量 DownloadTask. /flows 是统一列表接口, 不得复用
     # /downloads 的"非终态 + 最近 50"截断 — 那个截断是详情/操作端点的
     # 优化, 列表必须看到全部. 首版内存聚合后分页 (design Decision 5).
-    all_downloads = list(session.scalars(select(DownloadTask)))
+    all_downloads = DownloadTaskRepository(session).list_all(
+        access_scope=access_scope
+    )
 
     # 3) 去重: linked download 不再单独作为 download-only 出现 (design Decision 3)
     linked_dl_ids: set[str] = {

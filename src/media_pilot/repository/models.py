@@ -98,6 +98,12 @@ class IngestTask(Base):
     __tablename__ = "ingest_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    is_adult: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     source_path: Mapped[str] = mapped_column(String(4096), nullable=False)
     source_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     source_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -136,6 +142,12 @@ class DownloadTask(Base):
     __tablename__ = "download_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    is_adult: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     indexer: Mapped[str | None] = mapped_column(String(128))

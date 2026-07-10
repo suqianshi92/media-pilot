@@ -4,8 +4,11 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-_UNSET = object()
-
+from media_pilot.accounts.task_access import (
+    TaskAccessScope,
+    restrict_download_tasks,
+    restrict_ingest_tasks,
+)
 from media_pilot.repository.models import (
     AgentDecisionRequest,
     AgentMessage,
@@ -24,11 +27,15 @@ from media_pilot.repository.models import (
 )
 from media_pilot.repository.task_sort import build_task_list_order_by
 
+_UNSET = object()
+
 
 @dataclass(frozen=True, kw_only=True)
 class IngestTaskCreate:
     source_path: str
     status: str
+    owner_user_id: str | None = None
+    is_adult: bool = False
     current_step: str | None = None
     source_size_bytes: int | None = None
     source_modified_at: datetime | None = None
@@ -51,6 +58,8 @@ class IngestTaskRepository:
 
     def create(self, data: IngestTaskCreate) -> IngestTask:
         task = IngestTask(
+            owner_user_id=data.owner_user_id,
+            is_adult=data.is_adult,
             source_path=data.source_path,
             source_size_bytes=data.source_size_bytes,
             source_modified_at=data.source_modified_at,
@@ -80,10 +89,14 @@ class IngestTaskRepository:
         self,
         *,
         status: str | None = None,
+        access_scope: TaskAccessScope | None = None,
     ) -> list[IngestTask]:
-        statement = select(IngestTask).order_by(*build_task_list_order_by())
+        statement = select(IngestTask)
+        if access_scope is not None:
+            statement = restrict_ingest_tasks(statement, access_scope)
         if status is not None:
             statement = statement.where(IngestTask.status == status)
+        statement = statement.order_by(*build_task_list_order_by())
         return list(self._session.scalars(statement))
 
     def list_page(
@@ -92,27 +105,33 @@ class IngestTaskRepository:
         status: str | None = None,
         limit: int,
         offset: int,
+        access_scope: TaskAccessScope | None = None,
     ) -> "list[IngestTask]":
         """SQL 分页查询. 排序复用 `build_task_list_order_by()` 保持跨页稳定."""
 
+        statement = select(IngestTask)
+        if access_scope is not None:
+            statement = restrict_ingest_tasks(statement, access_scope)
+        if status is not None:
+            statement = statement.where(IngestTask.status == status)
         statement = (
-            select(IngestTask)
-            .order_by(*build_task_list_order_by())
+            statement.order_by(*build_task_list_order_by())
             .limit(limit)
             .offset(offset)
         )
-        if status is not None:
-            statement = statement.where(IngestTask.status == status)
         return list(self._session.scalars(statement))
 
     def count(
         self,
         *,
         status: str | None = None,
+        access_scope: TaskAccessScope | None = None,
     ) -> int:
         """SQL `COUNT(*)` 全量或按 status filter 统计 ingest task 行数."""
 
         statement = select(func.count()).select_from(IngestTask)
+        if access_scope is not None:
+            statement = restrict_ingest_tasks(statement, access_scope)
         if status is not None:
             statement = statement.where(IngestTask.status == status)
         return int(self._session.execute(statement).scalar_one())
@@ -137,6 +156,8 @@ class DownloadTaskCreate:
     title: str
     source: str
     save_path: str
+    owner_user_id: str | None = None
+    is_adult: bool = False
     indexer: str | None = None
     qb_hash: str | None = None
     qb_name: str | None = None
@@ -156,6 +177,8 @@ class DownloadTaskRepository:
 
     def create(self, data: DownloadTaskCreate) -> DownloadTask:
         task = DownloadTask(
+            owner_user_id=data.owner_user_id,
+            is_adult=data.is_adult,
             title=data.title,
             source=data.source,
             save_path=data.save_path,
@@ -174,22 +197,60 @@ class DownloadTaskRepository:
     def get(self, task_id: str) -> DownloadTask | None:
         return self._session.get(DownloadTask, task_id)
 
+    def get_authorized(
+        self,
+        task_id: str,
+        access_scope: TaskAccessScope,
+    ) -> DownloadTask | None:
+        statement = restrict_download_tasks(
+            select(DownloadTask).where(DownloadTask.id == task_id),
+            access_scope,
+        )
+        return self._session.scalars(statement).first()
+
     def get_by_qb_hash(self, qb_hash: str) -> DownloadTask | None:
         statement = select(DownloadTask).where(DownloadTask.qb_hash == qb_hash)
         return self._session.scalars(statement).first()
 
-    def list_non_terminal(self) -> list[DownloadTask]:
+    def list_non_terminal(
+        self,
+        *,
+        access_scope: TaskAccessScope | None = None,
+    ) -> list[DownloadTask]:
         """查询非终态下载任务（需要同步状态）。
 
         sync_failed 是可恢复状态而非终态：下载已提交但因 qB 临时不可达
         或 hash 暂未可见导致同步失败，后续同步周期必须继续纳入该任务。
         """
         terminal = {"completed", "failed"}
-        statement = (
-            select(DownloadTask)
-            .where(DownloadTask.status.notin_(terminal))
-            .order_by(DownloadTask.created_at.asc())
+        statement = select(DownloadTask).where(DownloadTask.status.notin_(terminal))
+        if access_scope is not None:
+            statement = restrict_download_tasks(statement, access_scope)
+        statement = statement.order_by(DownloadTask.created_at.asc())
+        return list(self._session.scalars(statement))
+
+    def list_recent_terminal(
+        self,
+        *,
+        limit: int,
+        access_scope: TaskAccessScope | None = None,
+    ) -> list[DownloadTask]:
+        statement = select(DownloadTask).where(
+            DownloadTask.status.in_(["completed", "failed"])
         )
+        if access_scope is not None:
+            statement = restrict_download_tasks(statement, access_scope)
+        statement = statement.order_by(DownloadTask.updated_at.desc()).limit(limit)
+        return list(self._session.scalars(statement))
+
+    def list_all(
+        self,
+        *,
+        access_scope: TaskAccessScope | None = None,
+    ) -> list[DownloadTask]:
+        statement = select(DownloadTask)
+        if access_scope is not None:
+            statement = restrict_download_tasks(statement, access_scope)
         return list(self._session.scalars(statement))
 
     def list_occupied_paths(self) -> "frozenset":  # noqa: F821  # frozenset[Path]
