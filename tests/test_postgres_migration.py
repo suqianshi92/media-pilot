@@ -98,6 +98,35 @@ def test_migrates_rows_without_real_data(tmp_path: Path) -> None:
         target_engine.dispose()
 
 
+def test_migration_skips_account_session_without_user(tmp_path: Path) -> None:
+    source = _init_source(tmp_path / "source")
+    source_engine = create_engine(f"sqlite+pysqlite:///{source}", future=True)
+    try:
+        with source_engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                INSERT INTO account_sessions (
+                    id, user_id, token_hash, last_active_at, expires_at, created_at
+                ) VALUES (
+                    'session-orphan', 'missing-user', :token_hash,
+                    '2026-07-10 00:00:00', '2026-08-09 00:00:00',
+                    '2026-07-10 00:00:00'
+                )
+                """,
+                {"token_hash": "a" * 64},
+            )
+    finally:
+        source_engine.dispose()
+
+    counts = migrate_sqlite_to_database(
+        sqlite_path=source,
+        database_url=_target_url(tmp_path / "target.sqlite3"),
+    )
+
+    assert counts["users"] == 0
+    assert counts["account_sessions"] == 0
+
+
 def test_migrates_file_sizes_larger_than_postgres_integer(tmp_path: Path) -> None:
     source = _init_source(tmp_path / "source")
     large_size = 8 * 1024 * 1024 * 1024

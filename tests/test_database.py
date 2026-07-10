@@ -64,6 +64,37 @@ def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_initialize_database_adds_account_tables_without_changing_existing_tasks(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    initialize_database(config)
+    engine = create_engine_from_config(config)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                IngestTask.__table__.insert().values(
+                    id="legacy-task",
+                    source_path="/data/watch/legacy.mkv",
+                    status="discovered",
+                )
+            )
+            connection.execute(text("DROP TABLE account_sessions"))
+            connection.execute(text("DROP TABLE users"))
+
+        initialize_database(config)
+
+        with engine.connect() as connection:
+            tables = set(inspect(connection).get_table_names())
+            legacy_status = connection.execute(
+                text("SELECT status FROM ingest_tasks WHERE id = 'legacy-task'")
+            ).scalar_one()
+        assert {"users", "account_sessions"} <= tables
+        assert legacy_status == "discovered"
+    finally:
+        engine.dispose()
+
+
 def test_ensure_column_adds_tool_call_id_to_existing_table(tmp_path: Path) -> None:
     """先创建缺少 tool_call_id 的 agent_tool_calls 表，再调用 initialize_database() 补齐列。"""
     config = make_config(tmp_path)

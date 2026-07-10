@@ -40,6 +40,7 @@ NULLABLE_FK_COLUMNS = {
     },
 }
 REQUIRED_FK_COLUMNS = {
+    "account_sessions": {"user_id": "users"},
     "media_candidates": {"task_id": "ingest_tasks"},
     "episode_mappings": {"task_id": "ingest_tasks"},
     "media_source_selections": {"task_id": "ingest_tasks"},

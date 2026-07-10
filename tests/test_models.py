@@ -22,6 +22,7 @@ def test_core_tables_are_registered() -> None:
     # 已从 SQLAlchemy metadata 中下线；现存数据库中可能保留旧数据，但应用层不再管理。
     assert set(Base.metadata.tables) == {
         "adapter_calls",
+        "account_sessions",
         "agent_decision_requests",
         "agent_messages",
         "agent_runs",
@@ -37,6 +38,7 @@ def test_core_tables_are_registered() -> None:
         "metadata_details",
         "operation_records",
         "search_keyword_records",
+        "users",
         "write_plans",
         "write_results",
     }

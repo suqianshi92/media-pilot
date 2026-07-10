@@ -1,9 +1,24 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    event,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
+from media_pilot.accounts.errors import ProtectedAdminError, UserDeletionForbiddenError
 from media_pilot.repository.database import Base
 
 
@@ -13,6 +28,70 @@ def new_id() -> str:
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'user')", name="ck_users_role"),
+        CheckConstraint(
+            "role != 'admin' OR can_access_adult = true",
+            name="ck_admin_adult_access",
+        ),
+        CheckConstraint(
+            "role != 'admin' OR is_enabled = true",
+            name="ck_admin_enabled",
+        ),
+        Index(
+            "uq_users_single_admin",
+            "role",
+            unique=True,
+            sqlite_where=text("role = 'admin'"),
+            postgresql_where=text("role = 'admin'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(128), nullable=False)
+    normalized_username: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True
+    )
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    can_access_adult: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class AccountSession(Base):
+    __tablename__ = "account_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+@event.listens_for(User, "before_update")
+def _protect_initial_admin_role(_mapper, _connection, user: User) -> None:
+    role_history = inspect(user).attrs.role.history
+    if "admin" in role_history.deleted and user.role != "admin":
+        raise ProtectedAdminError("initial admin cannot be demoted")
+
+
+@event.listens_for(User, "before_delete")
+def _forbid_user_deletion(_mapper, _connection, _user: User) -> None:
+    raise UserDeletionForbiddenError("users cannot be physically deleted")
 
 
 class IngestTask(Base):
