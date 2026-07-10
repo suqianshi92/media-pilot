@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig
@@ -221,17 +221,13 @@ def test_no_write_endpoint_exposed(tmp_path) -> None:
 # ---- 错误边界 ----
 
 
-def test_endpoint_works_when_session_factory_missing(tmp_path) -> None:
-    """无 DB 时, API 仍能返回, 计数退化为 0."""
+def test_endpoint_requires_database_backed_admin_session(tmp_path) -> None:
+    """后台诊断不在无数据库时降级为匿名公开接口。"""
 
     app = create_app(config=None, session_factory=None, enable_background_processor=False)
     client = TestClient(app)
     resp = client.get("/api/v1/agent-background/status")
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    # worker 没配置 → 一定 disabled
-    assert data["enabled"] is False
-    assert data["state"] == BackgroundState.DISABLED.value
+    assert resp.status_code == 503
 
 
 # ---- helpers ----

@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 

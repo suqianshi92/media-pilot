@@ -6,7 +6,7 @@ import io
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.config.settings import AppConfig
 from media_pilot.repository.database import create_session_factory, initialize_database

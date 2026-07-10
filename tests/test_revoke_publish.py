@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from media_pilot.app import create_app
@@ -26,6 +25,7 @@ from media_pilot.repository.models import (
     WriteResult,
 )
 from media_pilot.repository.repositories import IngestTaskCreate, IngestTaskRepository
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 # ── 测试辅助 ──
 
@@ -1654,7 +1654,6 @@ def test_deleted_status_renders_in_task_list(tmp_path: Path):
         assert result["status"] == "deleted"
 
     # 通过 API 获取任务详情
-    from fastapi.testclient import TestClient
     from media_pilot.app import create_app
 
     app = create_app(config=config, session_factory=session_factory)

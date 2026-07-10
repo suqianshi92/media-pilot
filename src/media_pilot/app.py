@@ -4,16 +4,18 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_pilot.accounts.csrf import csrf_middleware
 from media_pilot.api.agent_background_routes import router as agent_background_router
+from media_pilot.api.auth_dependencies import get_current_admin, get_current_auth
 from media_pilot.api.auth_routes import router as auth_router
 from media_pilot.api.content_discovery_routes import router as content_discovery_router
 from media_pilot.api.manual_upload_routes import router as manual_upload_router
+from media_pilot.api.public_routes import router as public_router
 from media_pilot.api.resource_discovery_routes import router as resource_discovery_router
 from media_pilot.api.settings_routes import router as settings_router
 from media_pilot.api.v1 import router as api_v1_router
@@ -184,7 +186,12 @@ def create_app(
     session_factory: sessionmaker[Session] | None = None,
     enable_background_processor: bool = False,
 ) -> FastAPI:
-    app = FastAPI(title="Media Pilot")
+    app = FastAPI(
+        title="Media Pilot",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     worker = Worker(config)
     app.state.worker = worker
     app.state.session_factory = session_factory
@@ -202,13 +209,18 @@ def create_app(
             )
 
     # 注册 JSON API 路由
+    app.include_router(public_router)
     app.include_router(auth_router)
-    app.include_router(api_v1_router)
-    app.include_router(settings_router)
-    app.include_router(resource_discovery_router)
-    app.include_router(content_discovery_router)
-    app.include_router(manual_upload_router)
-    app.include_router(agent_background_router)
+    # 认证会话只用于进入路由前的校验。function scope 确保 SSE/文件响应
+    # 不会在整个发送周期内占用数据库连接。
+    authenticated = [Depends(get_current_auth, scope="function")]
+    admin_only = [Depends(get_current_admin)]
+    app.include_router(api_v1_router, dependencies=authenticated)
+    app.include_router(resource_discovery_router, dependencies=authenticated)
+    app.include_router(content_discovery_router, dependencies=authenticated)
+    app.include_router(manual_upload_router, dependencies=authenticated)
+    app.include_router(settings_router, dependencies=admin_only)
+    app.include_router(agent_background_router, dependencies=admin_only)
 
     # 启动后台任务处理线程，定期扫描并处理 discovered/queued 任务
     if enable_background_processor:

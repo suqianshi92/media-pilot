@@ -16,6 +16,7 @@ from media_pilot.repository.repositories import (
     IngestTaskCreate,
     IngestTaskRepository,
 )
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 
 @pytest.fixture
@@ -218,7 +219,6 @@ class TestDownloadEndpoints:
         return create_session_factory(config)
 
     def test_detail_rejects_linked_ingest_task(self, tmp_path: Path) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         config = self._make_config(tmp_path)
@@ -237,7 +237,6 @@ class TestDownloadEndpoints:
         assert resp.status_code == 409
 
     def test_pause_rejects_linked_ingest_task(self, tmp_path: Path) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         config = self._make_config(tmp_path)
@@ -257,7 +256,6 @@ class TestDownloadEndpoints:
         assert resp.status_code == 409
 
     def test_resume_rejects_linked_ingest_task(self, tmp_path: Path) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         config = self._make_config(tmp_path)
@@ -277,7 +275,6 @@ class TestDownloadEndpoints:
         assert resp.status_code == 409
 
     def test_refresh_rejects_linked_ingest_task(self, tmp_path: Path) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         config = self._make_config(tmp_path)
@@ -297,7 +294,6 @@ class TestDownloadEndpoints:
 
     def test_resume_sets_awaiting_sync_not_downloading(self, tmp_path: Path, monkeypatch) -> None:
         """resume 成功后状态应为 awaiting_sync，不乐观伪造 downloading"""
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.resource_discovery.qbittorrent_adapter import QBittorrentAdapter
 
@@ -333,7 +329,6 @@ class TestDownloadEndpoints:
             assert dl2.status == "awaiting_sync"
 
     def test_pause_sets_paused_status(self, tmp_path: Path, monkeypatch) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.resource_discovery.qbittorrent_adapter import QBittorrentAdapter
 
@@ -362,7 +357,6 @@ class TestDownloadEndpoints:
 
     def test_detail_allows_download_only(self, tmp_path: Path) -> None:
         """无 ingest_task_id 的 download-only 流程可以正常查看详情"""
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = self._make_session_factory(tmp_path)
@@ -385,7 +379,6 @@ class TestDownloadEndpoints:
         assert data["data"]["status"] == "downloading"
 
     def test_detail_returns_not_found(self, tmp_path: Path) -> None:
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = self._make_session_factory(tmp_path)

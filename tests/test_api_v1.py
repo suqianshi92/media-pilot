@@ -3,7 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.adapters.metadata import MetadataCandidate, MetadataProviderResponse
 from media_pilot.app import create_app
@@ -538,9 +538,7 @@ def test_api_v1_task_status_not_found(tmp_path: Path) -> None:
 def test_api_v1_no_database_returns_error() -> None:
     client = TestClient(create_app())
     resp = client.get("/api/v1/tasks")
-    body = resp.json()
-    assert body["status"] == "error"
-    assert body["messages"][0]["code"] == "database_not_configured"
+    assert resp.status_code == 503
 
 
 # ── Issue A: 删除任务 / 删除下载遇 DB locked 返回结构化 409 ────────────

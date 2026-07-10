@@ -2,6 +2,7 @@ import pytest
 import threading
 
 from tests.agent_runner_helpers import MockLLMClient, _make_config, _make_task
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 # ══════════════════════════════════════════════════════════════════════
 # Retry Ack-only (fix-agent-retry-button-ui-state-semantics §4)
@@ -244,7 +245,6 @@ class TestRetryAckOnly:
             session.add(AgentRun(task_id=task_id, status="active"))
             session.commit()
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -394,7 +394,6 @@ class TestRetryAckOnlyFailure:
                 f"{[r.status for r in runs]}"
             )
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -506,7 +505,6 @@ class TestRetryAckOnlyFailure:
 
         monkeypatch.setattr(db_retry, "safe_commit", _raise_locked)
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)

@@ -149,17 +149,6 @@ _LIST_STATUS_FILTERS = frozenset({
 })
 
 
-@router.get("/health")
-def api_health() -> ApiEnvelope[dict[str, str]]:
-    """API v1 健康检查"""
-    return ApiEnvelope(
-        status="success",
-        data={"version": "v1"},
-        messages=[],
-        meta={},
-    )
-
-
 @router.get("/tasks")
 def list_tasks(
     request: Request,

@@ -1,6 +1,7 @@
 import pytest
 
 from tests.agent_runner_helpers import MockLLMClient, _make_config, _make_task
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 class TestFreeformMessagePersistence:
     def test_only_persists_raw_user_text_not_context(self, tmp_path):
@@ -403,7 +404,6 @@ class TestFreeformToolWhitelist:
 class TestFreeform409Guard:
     def test_freeform_409_when_pending_decision_exists(self, tmp_path):
         """Freeform input must be rejected with 409 when a pending decision exists."""
-        from fastapi.testclient import TestClient
 
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
@@ -459,7 +459,6 @@ class TestFreeform409Guard:
 
     def test_freeform_409_when_task_deleted(self, tmp_path):
         """Freeform input must be rejected with 409 when task is deleted."""
-        from fastapi.testclient import TestClient
 
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
@@ -499,7 +498,6 @@ class TestFreeform409Guard:
 
     def test_freeform_409_when_active_run_exists(self, tmp_path):
         """Freeform input must be rejected with 409 when an active run exists."""
-        from fastapi.testclient import TestClient
 
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig

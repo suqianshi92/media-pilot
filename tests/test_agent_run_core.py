@@ -1,6 +1,7 @@
 import pytest
 
 from tests.agent_runner_helpers import MockLLMClient, _make_config, _make_task
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 # ══════════════════════════════════════════════════════════════════════
 # AgentLLMClient
@@ -1244,7 +1245,6 @@ class TestAgentRunAPI:
             session.commit()
 
         # Now try to create another via API
-        from fastapi.testclient import TestClient
 
         from media_pilot.app import create_app
 
@@ -1259,7 +1259,6 @@ class TestAgentRunAPI:
         sf = _make_session_factory(tmp_path)
         config = _make_config(tmp_path)
 
-        from fastapi.testclient import TestClient
 
         from media_pilot.app import create_app
 

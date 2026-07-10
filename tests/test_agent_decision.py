@@ -3,6 +3,7 @@
 import pytest
 
 from tests.agent_runner_helpers import MockLLMClient, _make_config, _make_task
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -1013,7 +1014,6 @@ class TestDecisionAndMessageAPI:
             )
             session.commit()
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -1065,7 +1065,6 @@ class TestDecisionAndMessageAPI:
         # The API endpoint will use real AgentLLMClient which fails.
         # Test the structure by testing via reply service (already tested above).
         # Here we verify 404 and 409.
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -1111,7 +1110,6 @@ class TestDecisionAndMessageAPI:
             decisions = AgentDecisionRequestRepository(session).list_pending_by_task(task_id)
             decision_id = decisions[0].id
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -1152,7 +1150,6 @@ class TestDecisionAndMessageAPI:
             )
             session.commit()
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -1190,7 +1187,6 @@ class TestDecisionAndMessageAPI:
             )
             session.commit()
 
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)
@@ -1326,7 +1322,6 @@ class TestStateAndBoundaries:
             session.commit()
 
         # Now try to create new run via API → 409
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         app = create_app(config=config, session_factory=sf)

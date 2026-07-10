@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig

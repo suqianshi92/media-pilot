@@ -13,6 +13,7 @@ from media_pilot.accounts.cookies import (
     set_session_cookie,
 )
 from media_pilot.accounts.session_service import SessionService
+from media_pilot.repository.account_repositories import UserRepository
 from media_pilot.repository.models import AccountSession, User
 
 
@@ -41,12 +42,13 @@ def get_current_auth(
     response: Response,
     session_factory: SessionFactoryDep,
 ) -> Generator[AuthContext, None, None]:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
     session = session_factory()
     try:
+        if not UserRepository(session).has_users():
+            raise HTTPException(status_code=503, detail="Initialization required")
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        if not token:
+            raise HTTPException(status_code=401, detail="Authentication required")
         authenticated = SessionService().authenticate(
             session,
             token=token,
@@ -72,4 +74,16 @@ def get_current_auth(
         session.close()
 
 
-CurrentAuthDep = Annotated[AuthContext, Depends(get_current_auth)]
+CurrentAuthDep = Annotated[
+    AuthContext,
+    Depends(get_current_auth, scope="function"),
+]
+
+
+def get_current_admin(auth: CurrentAuthDep) -> AuthContext:
+    if auth.user.role != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return auth
+
+
+CurrentAdminDep = Annotated[AuthContext, Depends(get_current_admin)]

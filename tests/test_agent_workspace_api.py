@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
+
 
 class TestAgentStatusSummaryDTO:
     def test_defaults(self):
@@ -269,7 +271,6 @@ class TestAgentToolCallListByTask:
 class TestAgentToolCallsAPI:
     def test_list_tool_calls(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -313,7 +314,6 @@ class TestAgentToolCallsAPI:
 
     def test_list_tool_calls_task_not_found(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -323,7 +323,6 @@ class TestAgentToolCallsAPI:
 
     def test_list_tool_calls_empty(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -348,7 +347,6 @@ class TestAgentToolCallsAPI:
 class TestTaskListIncludesAgentStatus:
     def test_list_tasks_has_agent_status_summary(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -372,7 +370,6 @@ class TestTaskListIncludesAgentStatus:
 
     def test_list_tasks_with_agent_run(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -399,7 +396,6 @@ class TestTaskListIncludesAgentStatus:
     def test_list_tasks_filtered(self, tmp_path):
         """Task list with status filter should still include agent_status_summary."""
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -477,7 +473,6 @@ class TestTaskStatusAgentValues:
 
     def test_agent_statuses_in_api_listing(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -511,7 +506,6 @@ class TestAgentRetryAPI:
     def test_retry_returns_409_when_active_run_exists(self, tmp_path):
         """Retry must return 409 when an active or waiting AgentRun exists."""
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
 
@@ -552,7 +546,6 @@ class TestAgentRetryAPI:
     def test_retry_returns_409_when_waiting_run_exists(self, tmp_path):
         """Retry must return 409 when a waiting_user AgentRun exists."""
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
 
@@ -593,7 +586,6 @@ class TestAgentRetryAPI:
     def test_retry_allows_when_no_active_or_waiting_run(self, tmp_path):
         """Retry must succeed when no active/waiting run exists (only failed runs)."""
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
 
@@ -641,7 +633,6 @@ class TestAgentRetryAPI:
     def test_retry_returns_404_for_nonexistent_task(self, tmp_path):
         """Retry must return 404 when task does not exist."""
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
         from media_pilot.config.settings import AppConfig
 
@@ -678,7 +669,6 @@ class TestAgentToolCallStatusNormalization:
         wire status 差异误标为失败.
         """
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -723,7 +713,6 @@ class TestAgentToolCallStatusNormalization:
         返回, 不破坏老记录的展示.
         """
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -757,7 +746,6 @@ class TestAgentToolCallStatusNormalization:
         """regression: DB 写 "failed" / "failure" / "error" 都归一为 "failed".
         """
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)
@@ -793,7 +781,6 @@ class TestAgentToolCallStatusNormalization:
         误归一为 succeeded/failed.
         """
         from tests.test_api_v1 import _make_session_factory
-        from fastapi.testclient import TestClient
         from media_pilot.app import create_app
 
         sf = _make_session_factory(tmp_path)

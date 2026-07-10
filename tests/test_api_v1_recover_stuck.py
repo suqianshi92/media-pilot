@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from fastapi.testclient import TestClient
+from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig

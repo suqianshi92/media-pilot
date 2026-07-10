@@ -5,8 +5,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 import media_pilot.api.auth_routes as auth_routes
+from media_pilot.accounts.passwords import hash_password
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig
+from media_pilot.repository.account_repositories import UserRepository
 from media_pilot.repository.database import create_session_factory, initialize_database
 from media_pilot.repository.models import AccountSession
 
@@ -64,6 +66,93 @@ def test_auth_status_issues_csrf_cookie_and_reports_initialization(tmp_path: Pat
     initialize(client)
     after = client.get("/api/v1/auth/status")
     assert after.json()["data"] == {"initialized": True}
+
+
+def test_business_routes_require_initialization_then_login(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/api/v1/health").status_code == 200
+    assert client.get("/docs").status_code == 404
+    assert client.get("/redoc").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+    assert client.get("/api/v1/tasks").status_code == 503
+
+    initialize(client)
+    assert client.get("/api/v1/tasks").status_code == 200
+    client.post("/api/v1/auth/logout", headers=csrf_headers(client))
+    assert client.get("/api/v1/tasks").status_code == 401
+
+
+def test_anonymous_stream_route_obeys_initialization_and_login_gates(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path)
+    client.get("/api/v1/auth/status")
+    request = {
+        "messages": [{"role": "user", "content": "recommend a movie"}],
+    }
+
+    pending = client.post(
+        "/api/v1/content-discovery/stream",
+        json=request,
+        headers=csrf_headers(client),
+    )
+    assert pending.status_code == 503
+
+    initialize(client)
+    client.post("/api/v1/auth/logout", headers=csrf_headers(client))
+    anonymous = client.post(
+        "/api/v1/content-discovery/stream",
+        json=request,
+        headers=csrf_headers(client),
+    )
+    assert anonymous.status_code == 401
+
+
+def test_settings_and_background_diagnostics_require_admin(tmp_path: Path) -> None:
+    admin_client = make_client(tmp_path)
+    initialize(admin_client)
+    assert admin_client.get("/api/v1/settings").status_code == 200
+    assert admin_client.get("/api/v1/agent-background/status").status_code == 200
+
+    with admin_client.app.state.session_factory() as session:
+        UserRepository(session).create_user(
+            username="Alice",
+            password_hash=hash_password("alice password"),
+        )
+        session.commit()
+
+    user_client = TestClient(admin_client.app)
+    user_client.get("/api/v1/auth/status")
+    login_response = user_client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "alice password"},
+        headers=csrf_headers(user_client),
+    )
+    assert login_response.status_code == 200
+    assert user_client.get("/api/v1/tasks").status_code == 200
+    assert user_client.get("/api/v1/settings").status_code == 403
+    assert user_client.get("/api/v1/agent-background/status").status_code == 403
+
+
+def test_streaming_routes_release_auth_session_before_sending_response() -> None:
+    app = create_app()
+    streaming_paths = {
+        "/api/v1/content-discovery/stream",
+        "/api/v1/tasks/{task_id}/agent-runs/stream",
+    }
+
+    routes_by_path = {
+        route.path: route
+        for route in app.routes
+        if getattr(route, "path", None) in streaming_paths
+    }
+
+    assert routes_by_path.keys() == streaming_paths
+    for route in routes_by_path.values():
+        auth_dependency = route.dependant.dependencies[0]
+        assert auth_dependency.scope == "function"
 
 
 def test_initialize_creates_admin_and_authenticated_session(tmp_path: Path) -> None:
