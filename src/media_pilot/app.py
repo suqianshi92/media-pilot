@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_pilot.accounts.csrf import csrf_middleware
 from media_pilot.api.agent_background_routes import router as agent_background_router
+from media_pilot.api.auth_routes import router as auth_router
 from media_pilot.api.content_discovery_routes import router as content_discovery_router
 from media_pilot.api.manual_upload_routes import router as manual_upload_router
 from media_pilot.api.resource_discovery_routes import router as resource_discovery_router
@@ -187,6 +189,7 @@ def create_app(
     app.state.worker = worker
     app.state.session_factory = session_factory
     app.state.config = config
+    app.middleware("http")(csrf_middleware)
 
     # 同步启动配置校验结果到后台状态服务 — 进程内单例, 不持久化.
     # 校验失败时 disabled 状态会暴露具体原因, 但不泄漏密钥值或路径凭据
@@ -199,6 +202,7 @@ def create_app(
             )
 
     # 注册 JSON API 路由
+    app.include_router(auth_router)
     app.include_router(api_v1_router)
     app.include_router(settings_router)
     app.include_router(resource_discovery_router)

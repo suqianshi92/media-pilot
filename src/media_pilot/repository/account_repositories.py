@@ -1,17 +1,23 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from media_pilot.accounts.errors import (
     AlreadyInitializedError,
+    InvalidUsernameError,
     ProtectedAdminError,
 )
 from media_pilot.repository.models import AccountSession, User
 
 
 def normalize_username(username: str) -> str:
-    return username.casefold()
+    if not 1 <= len(username) <= 128 or "\x00" in username:
+        raise InvalidUsernameError("username must contain 1 to 128 valid characters")
+    normalized = username.casefold()
+    if len(normalized) > 128:
+        raise InvalidUsernameError("normalized username exceeds 128 characters")
+    return normalized
 
 
 class UserRepository:
@@ -68,6 +74,11 @@ class UserRepository:
     def set_enabled(self, user: User, is_enabled: bool) -> User:
         if user.role == "admin" and not is_enabled:
             raise ProtectedAdminError("initial admin cannot be disabled")
+        if not is_enabled:
+            AccountSessionRepository(self._session).revoke_all_for_user(
+                user.id,
+                now=datetime.now(UTC),
+            )
         user.is_enabled = is_enabled
         return user
 
@@ -112,6 +123,34 @@ class AccountSessionRepository:
             AccountSession.expires_at > now,
         )
         return self._session.scalars(statement).first()
+
+    def get_by_token_hash(self, token_hash: str) -> AccountSession | None:
+        statement = select(AccountSession).where(AccountSession.token_hash == token_hash)
+        return self._session.scalars(statement).first()
+
+    def renew_if_due(
+        self,
+        account_session: AccountSession,
+        *,
+        now: datetime,
+        renewal_interval: timedelta,
+        expires_at: datetime,
+    ) -> bool:
+        statement = (
+            update(AccountSession)
+            .where(
+                AccountSession.id == account_session.id,
+                AccountSession.revoked_at.is_(None),
+                AccountSession.expires_at > now,
+                AccountSession.last_active_at <= now - renewal_interval,
+            )
+            .values(last_active_at=now, expires_at=expires_at)
+            .execution_options(synchronize_session=False)
+        )
+        result = self._session.execute(statement)
+        renewed = bool(result.rowcount)
+        self._session.refresh(account_session)
+        return renewed
 
     def revoke_all_for_user(self, user_id: str, *, now: datetime) -> int:
         statement = select(AccountSession).where(
