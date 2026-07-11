@@ -49,6 +49,24 @@ MEDIA_PILOT_DATABASE_URL=postgresql+psycopg://media_pilot:media_pilot@media-pilo
 
 `MEDIA_PILOT_DATABASE_DIR` 仍保留给 SQLite 回退和旧库迁移使用。未设置 `MEDIA_PILOT_DATABASE_URL` 时，应用会回退到 `MEDIA_PILOT_DATABASE_DIR/media-pilot.sqlite3`。
 
+## 初始管理员密码恢复
+
+忘记初始管理员密码时，在部署目录通过交互式命令重置。命令会自动定位系统中唯一的初始管理员，两次隐藏读取新密码；成功后撤销该管理员的全部现有会话，不改变用户名、权限或任务归属。
+
+主容器正常运行时执行：
+
+```bash
+docker compose exec media-pilot python -m media_pilot.deployment.reset_admin_password
+```
+
+主容器无法启动时，保持数据库服务可用，并通过同一服务定义启动一次性容器：
+
+```bash
+docker compose run --rm --no-deps media-pilot python -m media_pilot.deployment.reset_admin_password
+```
+
+不要把新密码写入命令参数、环境变量或日志。一次性容器方式不会启动依赖服务；使用默认 PostgreSQL 部署时，应先确认 `media-pilot-postgres` 已运行。
+
 ### 从 SQLite 迁移到 PostgreSQL
 
 迁移前先停止应用并备份旧库：
