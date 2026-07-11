@@ -67,6 +67,8 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unknown'
 
 export interface DownloadTaskSummary {
   id: string
+  owner_user_id?: string | null
+  owner_username?: string | null
   title: string
   source: string
   qb_hash: string | null
@@ -88,6 +90,8 @@ export interface DownloadTaskSummary {
 
 export interface DownloadDetail {
   id: string
+  owner_user_id?: string | null
+  owner_username?: string | null
   title: string
   source: string
   qb_hash: string | null
@@ -153,6 +157,8 @@ export type MetadataStatus = 'unknown' | 'complete' | 'none'
 
 export interface TaskSummary {
   id: string
+  owner_user_id?: string | null
+  owner_username?: string | null
   source_path: string
   title: string | null
   year: number | null
@@ -176,6 +182,8 @@ export interface TaskSummary {
 // 让前端不必解析 id 即可决定详情跳转.
 export interface FlowSummary {
   id: string
+  owner_user_id?: string | null
+  owner_username?: string | null
   flow_type: FlowType
   route_target: RouteTarget
   ingest_task_id: string | null

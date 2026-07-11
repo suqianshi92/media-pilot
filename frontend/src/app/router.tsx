@@ -43,6 +43,11 @@ function AdminRoute() {
   return <Outlet />
 }
 
+function TaskListRoute() {
+  const { user } = useAuth()
+  return <TaskListPage showOwner={user?.role === 'admin'} />
+}
+
 const routes: RouteObject[] = [
   {
     element: <AuthRoot />,
@@ -56,7 +61,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'tasks',
-        element: <TaskListPage />,
+        element: <TaskListRoute />,
       },
       {
         path: 'tasks/:taskId',

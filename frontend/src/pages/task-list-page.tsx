@@ -143,7 +143,7 @@ function getFlowSourceLabel(flowType: FlowSummary['flow_type'], t: (key: string)
 
 const columnHelper = createColumnHelper<FlowSummary>()
 
-const taskColumns = (t: (key: string) => string): ColumnDef<FlowSummary, any>[] => [
+const taskColumns = (t: (key: string) => string, showOwner = false): ColumnDef<FlowSummary, any>[] => [
   columnHelper.accessor('total_status', {
     header: t('taskList.status'),
     cell: (info) => <TotalStatusBadge status={info.getValue()} />,
@@ -187,6 +187,11 @@ const taskColumns = (t: (key: string) => string): ColumnDef<FlowSummary, any>[] 
       )
     },
   }),
+  ...(showOwner ? [columnHelper.accessor('owner_username', {
+    id: 'owner',
+    header: '创建者',
+    cell: (info) => info.getValue() ?? '系统',
+  })] : []),
   columnHelper.accessor('file_format', {
     header: t('taskList.fileFormat'),
     cell: (info) => <span className="text-muted-foreground">{info.getValue() ?? '—'}</span>,
@@ -440,8 +445,10 @@ interface DeleteTarget {
 
 export function TaskListPage({
   service = defaultTaskService,
+  showOwner = false,
 }: {
   service?: TaskListService
+  showOwner?: boolean
 }) {
   const { t } = useTranslation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -720,7 +727,7 @@ export function TaskListPage({
         </div>
       ) : (
         <DataTable
-          columns={taskColumns(t)}
+          columns={taskColumns(t, showOwner)}
           data={allItems}
           disablePagination
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
