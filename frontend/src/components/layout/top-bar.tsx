@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Menu, RefreshCw, Sun, Moon, Monitor } from 'lucide-react'
+import { LogOut, Menu, RefreshCw, Sun, Moon, Monitor } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LANGUAGE_KEY } from '@/i18n'
+import { useAuth } from '@/auth/auth-context'
 
 const markUrl = `${import.meta.env.BASE_URL}media-pilot-mark.svg`
 
@@ -12,6 +13,7 @@ interface TopBarProps {
 
 export function TopBar({ onToggleSidebar }: TopBarProps) {
   const { t } = useTranslation()
+  const auth = useAuth()
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b border-border bg-surface px-4">
@@ -44,6 +46,16 @@ export function TopBar({ onToggleSidebar }: TopBarProps) {
 
       <ThemeToggle />
       <LanguageToggle />
+      <span className="hidden text-xs text-muted-foreground sm:inline">{auth.user?.username}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => void auth.logout()}
+        title="退出登录"
+        aria-label="退出登录"
+      >
+        <LogOut className="h-4 w-4" />
+      </Button>
     </header>
   )
 }

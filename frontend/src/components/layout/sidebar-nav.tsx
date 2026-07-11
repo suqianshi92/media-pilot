@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, ListTodo, Search, Settings, Upload, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '@/auth/auth-context'
 
 interface SidebarNavProps {
   open: boolean
@@ -17,6 +18,8 @@ const navKeys = [
 
 export function SidebarNav({ open, onClose }: SidebarNavProps) {
   const { t } = useTranslation()
+  const { user } = useAuth()
+  const visibleItems = navKeys.filter((item) => item.to !== '/settings' || user?.role === 'admin')
 
   return (
     <>
@@ -45,7 +48,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
         </div>
 
         <nav className="flex flex-col gap-1 px-2 py-3">
-          {navKeys.map((item) => {
+          {visibleItems.map((item) => {
             const label = t(item.labelKey)
             return (
               <NavLink
