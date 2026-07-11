@@ -28,6 +28,7 @@ from media_pilot.api.task_mapper import (
     map_download_task_to_summary,
     map_to_task_detail,
     map_to_task_summaries,
+    resolve_task_owner,
 )
 from media_pilot.config import AppConfig
 from media_pilot.repository.models import (
@@ -288,7 +289,14 @@ def list_downloads(
         start = (page - 1) * page_size
         paged = all_downloads[start : start + page_size]
 
-        items = [map_download_task_to_summary(t) for t in paged]
+        items = [
+            map_download_task_to_summary(
+                task,
+                session=session,
+                access_scope=access_scope,
+            )
+            for task in paged
+        ]
 
     return ApiEnvelope(
         status="success",
@@ -467,7 +475,9 @@ def retry_download_sync(
     dependencies=[Depends(require_authorized_download_task)],
 )
 def download_detail(
-    download_id: str, request: Request,
+    download_id: str,
+    request: Request,
+    access_scope: TaskAccessDep,
 ) -> ApiEnvelope[dict]:
     """下载流程详情 — 返回 download-only 流程的完整信息"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -494,8 +504,15 @@ def download_detail(
                 detail="该下载任务已关联入库任务，请通过入库任务入口查看",
             )
 
+        owner_user_id, owner_username = resolve_task_owner(
+            session,
+            dl.owner_user_id,
+            access_scope,
+        )
         detail = DownloadDetailDto(
             id=dl.id,
+            owner_user_id=owner_user_id,
+            owner_username=owner_username,
             title=dl.title,
             source=dl.source,
             qb_hash=dl.qb_hash,
@@ -705,7 +722,11 @@ def delete_task(
     "/tasks/{task_id}",
     dependencies=[Depends(require_authorized_ingest_task)],
 )
-def task_detail(task_id: str, request: Request) -> ApiEnvelope[dict]:
+def task_detail(
+    task_id: str,
+    request: Request,
+    access_scope: TaskAccessDep,
+) -> ApiEnvelope[dict]:
     """任务详情，返回前端详情页所需的所有结构化字段"""
     session_factory: sessionmaker[Session] | None = getattr(
         request.app.state, "session_factory", None
@@ -808,6 +829,7 @@ def task_detail(task_id: str, request: Request) -> ApiEnvelope[dict]:
             audit_logs=audit_logs,
             candidates=candidates,
             episode_mappings=episode_mappings,
+            access_scope=access_scope,
         )
 
     return ApiEnvelope(

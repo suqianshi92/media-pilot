@@ -401,6 +401,9 @@ def persist_metadata_selection(
     Creates a MediaCandidate record with source="agent" to track the
     Agent's selection decision.
     """
+    from media_pilot.accounts.task_classification import (
+        is_adult_metadata_selection,
+    )
     from media_pilot.repository.repositories import (
         IngestTaskRepository,
         MediaCandidateRepository,
@@ -437,6 +440,10 @@ def persist_metadata_selection(
         task.year = year
     if confidence is not None:
         task.confidence = max(task.confidence or 0, confidence)
+    task.is_adult = is_adult_metadata_selection(
+        profile=None,
+        provider=provider_name,
+    )
     session.flush()
 
     return PersistSelectionResult(

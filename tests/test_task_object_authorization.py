@@ -78,6 +78,12 @@ def test_other_users_and_inaccessible_adult_tasks_are_not_found(
             is_adult=True,
         ))
         downloads = DownloadTaskRepository(session)
+        own_download = downloads.create(DownloadTaskCreate(
+            title="alice.mkv",
+            source="prowlarr",
+            save_path="/data/downloads",
+            owner_user_id=alice.id,
+        ))
         other_download = downloads.create(DownloadTaskCreate(
             title="bob.mkv",
             source="prowlarr",
@@ -108,7 +114,14 @@ def test_other_users_and_inaccessible_adult_tasks_are_not_found(
 
     client = _login(app, "alice", "alice password")
 
-    assert client.get(f"/api/v1/tasks/{own.id}").status_code == 200
+    own_detail = client.get(f"/api/v1/tasks/{own.id}")
+    assert own_detail.status_code == 200
+    assert own_detail.json()["data"]["task"]["owner_user_id"] is None
+    assert own_detail.json()["data"]["task"]["owner_username"] is None
+    own_download_detail = client.get(f"/api/v1/downloads/{own_download.id}")
+    assert own_download_detail.status_code == 200
+    assert own_download_detail.json()["data"]["owner_user_id"] is None
+    assert own_download_detail.json()["data"]["owner_username"] is None
     assert client.get(f"/api/v1/tasks/{other.id}").status_code == 404
     assert client.get(f"/api/v1/tasks/{adult.id}").status_code == 404
     assert client.post(f"/api/v1/tasks/{other.id}/process").status_code == 404
@@ -124,6 +137,16 @@ def test_other_users_and_inaccessible_adult_tasks_are_not_found(
         f"/api/v1/agent-decisions/{own_conflict.id}/reply",
         json={"option_id": "overwrite_target"},
     ).status_code == 403
+
+    admin = AuthenticatedTestClient(app)
+    task_detail = admin.get(f"/api/v1/tasks/{other.id}")
+    assert task_detail.status_code == 200
+    assert task_detail.json()["data"]["task"]["owner_user_id"] == bob.id
+    assert task_detail.json()["data"]["task"]["owner_username"] == "Bob"
+    download_detail = admin.get(f"/api/v1/downloads/{other_download.id}")
+    assert download_detail.status_code == 200
+    assert download_detail.json()["data"]["owner_user_id"] == bob.id
+    assert download_detail.json()["data"]["owner_username"] == "Bob"
 
 
 def test_every_task_object_route_declares_the_matching_authorization_dependency() -> None:

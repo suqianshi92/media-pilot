@@ -92,6 +92,7 @@ def test_task_lists_filter_owner_and_adult_before_total_and_pagination(
     flows = alice_client.get("/api/v1/flows?page=1&page_size=1").json()
     assert tasks["meta"]["total"] == 1
     assert tasks["data"]["items"][0]["source_path"].endswith("alice-normal.mkv")
+    assert tasks["data"]["items"][0]["owner_username"] is None
     assert downloads["meta"]["total"] == 1
     assert downloads["data"]["items"][0]["title"] == "alice-normal.mkv"
     assert flows["meta"]["total"] == 2
@@ -106,6 +107,27 @@ def test_task_lists_filter_owner_and_adult_before_total_and_pagination(
     assert alice_client.get("/api/v1/downloads").json()["meta"]["total"] == 2
     assert alice_client.get("/api/v1/flows").json()["meta"]["total"] == 4
 
-    assert admin_client.get("/api/v1/tasks").json()["meta"]["total"] == 4
-    assert admin_client.get("/api/v1/downloads").json()["meta"]["total"] == 4
-    assert admin_client.get("/api/v1/flows").json()["meta"]["total"] == 8
+    admin_tasks = admin_client.get("/api/v1/tasks").json()
+    assert admin_tasks["meta"]["total"] == 4
+    task_owners = {
+        item["source_path"]: item["owner_username"]
+        for item in admin_tasks["data"]["items"]
+    }
+    assert task_owners["/data/alice-normal.mkv"] == "Alice"
+    assert task_owners["/data/system.mkv"] == "系统"
+
+    admin_downloads = admin_client.get("/api/v1/downloads").json()
+    assert admin_downloads["meta"]["total"] == 4
+    download_owners = {
+        item["title"]: item["owner_username"]
+        for item in admin_downloads["data"]["items"]
+    }
+    assert download_owners["alice-normal.mkv"] == "Alice"
+    assert download_owners["system.mkv"] == "系统"
+
+    admin_flows = admin_client.get("/api/v1/flows").json()
+    assert admin_flows["meta"]["total"] == 8
+    assert {item["owner_username"] for item in admin_flows["data"]["items"]} >= {
+        "Alice",
+        "系统",
+    }

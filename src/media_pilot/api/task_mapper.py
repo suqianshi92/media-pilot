@@ -49,16 +49,42 @@ from media_pilot.repository.models import (
     SearchKeywordRecord,
     WritePlan,
     WriteResult,
+    User,
 )
 from media_pilot.repository.repositories import DownloadTaskRepository
 
 logger = logging.getLogger(__name__)
 
 
-def map_download_task_to_summary(task: DownloadTask) -> DownloadTaskSummary:
+def resolve_task_owner(
+    session: Session,
+    owner_user_id: str | None,
+    access_scope: TaskAccessScope | None,
+) -> tuple[str | None, str | None]:
+    if access_scope is None or not access_scope.can_view_all_tasks:
+        return None, None
+    if owner_user_id is None:
+        return None, "系统"
+    user = session.get(User, owner_user_id)
+    return owner_user_id, user.username if user is not None else "未知用户"
+
+
+def map_download_task_to_summary(
+    task: DownloadTask,
+    *,
+    session: Session | None = None,
+    access_scope: TaskAccessScope | None = None,
+) -> DownloadTaskSummary:
     """将 DownloadTask ORM 映射为 DownloadTaskSummary DTO"""
+    owner_user_id, owner_username = (
+        resolve_task_owner(session, task.owner_user_id, access_scope)
+        if session is not None
+        else (None, None)
+    )
     return DownloadTaskSummary(
         id=task.id,
+        owner_user_id=owner_user_id,
+        owner_username=owner_username,
         title=task.title,
         source=task.source,
         qb_hash=task.qb_hash,
@@ -295,6 +321,11 @@ def map_to_task_summaries(
 
     result: list[TaskSummary] = []
     for task in tasks:
+        owner_user_id, owner_username = resolve_task_owner(
+            session,
+            task.owner_user_id,
+            access_scope,
+        )
         # 提取标题和年份：仅依赖 IngestTask 直写字段；
         # 旧 ConfirmationRequest.ai_candidate fallback 已随 ConfirmationRequest 一起下线。
         title = task.title
@@ -326,11 +357,17 @@ def map_to_task_summaries(
                     access_scope,
                 )
             if dl_task is not None:
-                download_summary = map_download_task_to_summary(dl_task)
+                download_summary = map_download_task_to_summary(
+                    dl_task,
+                    session=session,
+                    access_scope=access_scope,
+                )
 
         result.append(
             TaskSummary(
                 id=task.id,
+                owner_user_id=owner_user_id,
+                owner_username=owner_username,
                 source_path=task.source_path,
                 title=title,
                 year=year,
@@ -433,9 +470,14 @@ def map_to_task_detail(
     audit_logs: list[AuditLog],
     candidates: list[MediaCandidate],
     episode_mappings: list[EpisodeMapping] | None = None,
+    access_scope: TaskAccessScope | None = None,
 ) -> TaskDetailDto:
     """将 IngestTask 及其关联数据映射为 TaskDetailDto"""
-    task_summary = map_to_task_summaries(session, [task])[0]
+    task_summary = map_to_task_summaries(
+        session,
+        [task],
+        access_scope=access_scope,
+    )[0]
 
     return TaskDetailDto(
         task=task_summary,

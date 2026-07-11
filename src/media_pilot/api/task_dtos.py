@@ -124,6 +124,8 @@ ProfileSearchStatus = Literal["succeeded", "failed", "skipped"]
 class DownloadTaskSummary(BaseModel):
     """下载任务摘要，供前端任务列表和详情展示"""
     id: str
+    owner_user_id: str | None = None
+    owner_username: str | None = None
     title: str
     source: str
     qb_hash: str | None = None
@@ -146,6 +148,8 @@ class DownloadTaskSummary(BaseModel):
 class DownloadDetailDto(BaseModel):
     """下载流程详情 — 供下载详情页使用"""
     id: str
+    owner_user_id: str | None = None
+    owner_username: str | None = None
     title: str
     source: str
     qb_hash: str | None = None
@@ -218,6 +222,8 @@ class TaskSummary(BaseModel):
     - total_status: 流程总状态，按阶段推进（下载中/等待转入入库/入库阶段状态）
     """
     id: str
+    owner_user_id: str | None = None
+    owner_username: str | None = None
     source_path: str
     title: str | None = None
     year: int | None = None
@@ -258,6 +264,8 @@ class FlowSummary(BaseModel):
     字段集与 TaskSummary 平行, 列表页可以直接消费.
     """
     id: str
+    owner_user_id: str | None = None
+    owner_username: str | None = None
     flow_type: FlowType
     route_target: RouteTarget
     ingest_task_id: str | None = None

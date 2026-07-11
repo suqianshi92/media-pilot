@@ -734,6 +734,43 @@ class TestUserDecisionShortCircuit:
 
 
 class TestPersistMetadataSelection:
+    def test_persist_reclassifies_adult_task_from_selected_provider(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        from media_pilot.repository.repositories import IngestTaskRepository
+        from media_pilot.services.auto_ingest import persist_metadata_selection
+
+        sf = _make_session_factory(tmp_path)
+        with sf() as session:
+            task = _make_task(session, is_adult=False)
+            task_id = task.id
+
+        with sf() as session:
+            persist_metadata_selection(
+                session=session,
+                task_id=task_id,
+                provider_name="tpdb",
+                provider_id="adult:123",
+                media_type="movie",
+                title="Adult Movie",
+            )
+            session.commit()
+        with sf() as session:
+            assert IngestTaskRepository(session).get(task_id).is_adult is True
+
+        with sf() as session:
+            persist_metadata_selection(
+                session=session,
+                task_id=task_id,
+                provider_name="tmdb",
+                provider_id="movie:123",
+                media_type="movie",
+                title="Regular Movie",
+            )
+            session.commit()
+        with sf() as session:
+            assert IngestTaskRepository(session).get(task_id).is_adult is False
+
     def test_persist_creates_candidate_and_updates_task(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
 

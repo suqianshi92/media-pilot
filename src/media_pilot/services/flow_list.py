@@ -120,6 +120,8 @@ def _ingest_summary_to_flow(task: TaskSummary) -> FlowSummary:
 
     return FlowSummary(
         id=f"ingest:{task.id}",
+        owner_user_id=task.owner_user_id,
+        owner_username=task.owner_username,
         flow_type=flow_type,
         route_target="task_detail",
         ingest_task_id=task.id,
@@ -152,6 +154,8 @@ def _download_only_flow(dl: DownloadTaskSummary) -> FlowSummary:
 
     return FlowSummary(
         id=f"download:{dl.id}",
+        owner_user_id=dl.owner_user_id,
+        owner_username=dl.owner_username,
         flow_type="download_only",
         route_target="download_detail",
         ingest_task_id=dl.ingest_task_id,
@@ -214,7 +218,11 @@ def build_flows(
     }
     orphan_downloads = [d for d in all_downloads if d.id not in linked_dl_ids]
     orphan_flows = [
-        _download_only_flow(map_download_task_to_summary(d))
+        _download_only_flow(map_download_task_to_summary(
+            d,
+            session=session,
+            access_scope=access_scope,
+        ))
         for d in orphan_downloads
     ]
 
