@@ -7,7 +7,7 @@ POST /api/v1/resource-discovery/download
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -45,7 +45,11 @@ class ResourceDownloadBody(BaseModel):
 
 
 @router.post("/search")
-def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
+def search(
+    body: ResourceSearchBody,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
     """直接资源搜索 — 默认跳过 LLM 意图解析。"""
     config: AppConfig | None = getattr(request.app.state, "config", None)
     if config is None:
@@ -68,6 +72,8 @@ def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
             )],
             meta={},
         )
+    if search_type == "adult" and not auth.user.can_access_adult:
+        raise HTTPException(status_code=403, detail="Adult access required")
 
     # 读取应用配置中的语言偏好和已启用 profile
     preferred_language = "zh"
@@ -89,6 +95,8 @@ def search(body: ResourceSearchBody, request: Request) -> ApiEnvelope[dict]:
         skip_intent=body.skip_intent,
         preferred_language=preferred_language,
         enabled_profiles=enabled_profiles,
+        owner_user_id=auth.user.id,
+        can_access_adult=auth.user.can_access_adult,
     )
 
     if result["status"] == "error":
@@ -138,6 +146,7 @@ def download(
         preselected_provider=body.preselected_provider,
         preselected_external_id=body.preselected_external_id,
         owner_user_id=auth.user.id,
+        can_access_adult=auth.user.can_access_adult,
     )
 
     if result["status"] == "error":
@@ -257,7 +266,11 @@ class CandidateIdentifyBody(BaseModel):
 
 
 @router.post("/identify")
-def identify(body: CandidateIdentifyBody, request: Request) -> ApiEnvelope[dict]:
+def identify(
+    body: CandidateIdentifyBody,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
     """候选识别 — 对单个资源候选执行元数据检索"""
     config: AppConfig | None = getattr(request.app.state, "config", None)
     if config is None:
@@ -278,9 +291,13 @@ def identify(body: CandidateIdentifyBody, request: Request) -> ApiEnvelope[dict]
     if body.candidate_handle:
         try:
             from media_pilot.services.candidate_cache import lookup_candidate
-            cached, intent_ctx = lookup_candidate(body.candidate_handle)
+            cached, intent_ctx = lookup_candidate(
+                body.candidate_handle,
+                owner_user_id=auth.user.id,
+                can_access_adult=auth.user.can_access_adult,
+            )
             if cached is not None:
-                candidate_context = (cached.get("title") or "").strip()
+                candidate_context = (cached.title or "").strip()
         except Exception:
             pass
 
@@ -327,6 +344,8 @@ def identify(body: CandidateIdentifyBody, request: Request) -> ApiEnvelope[dict]
             meta={},
         )
     provider_name = profile.provider_name
+    if provider_name == "tpdb" and not auth.user.can_access_adult:
+        raise HTTPException(status_code=403, detail="Adult access required")
 
     try:
         candidates = search_metadata_candidates(

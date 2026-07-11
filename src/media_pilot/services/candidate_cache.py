@@ -31,7 +31,13 @@ def _prune_cache() -> None:
             _CANDIDATE_CACHE.pop(t, None)
 
 
-def store_candidate(candidate, intent_context: dict | None = None) -> str:
+def store_candidate(
+    candidate,
+    intent_context: dict | None = None,
+    *,
+    owner_user_id: str | None = None,
+    is_adult: bool = False,
+) -> str:
     """将候选存入缓存，返回不可预测 token"""
     _prune_cache()
     import secrets as _secrets
@@ -39,17 +45,28 @@ def store_candidate(candidate, intent_context: dict | None = None) -> str:
     _CANDIDATE_CACHE[token] = {
         "candidate": candidate,
         "intent_context": intent_context or {},
+        "owner_user_id": owner_user_id,
+        "is_adult": is_adult,
         "created_at": time.time(),
     }
     return token
 
 
-def lookup_candidate(token: str):
+def lookup_candidate(
+    token: str,
+    *,
+    owner_user_id: str | None = None,
+    can_access_adult: bool = True,
+):
     """从缓存取候选及其意图上下文，过期返回 None"""
     entry = _CANDIDATE_CACHE.get(token)
     if entry is None:
         return None, {}
     if time.time() - entry["created_at"] > _CANDIDATE_TTL_SECONDS:
         _CANDIDATE_CACHE.pop(token, None)
+        return None, {}
+    if owner_user_id is not None and entry.get("owner_user_id") != owner_user_id:
+        return None, {}
+    if entry.get("is_adult", False) and not can_access_adult:
         return None, {}
     return entry["candidate"], entry.get("intent_context", {})

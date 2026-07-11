@@ -37,6 +37,8 @@ def search_resources(
     skip_intent: bool = False,
     preferred_language: str = "zh",
     enabled_profiles: list[str] | None = None,
+    owner_user_id: str | None = None,
+    can_access_adult: bool = True,
 ) -> dict:
     """自然语言搜索资源：LLM 意图解析 → Prowlarr 搜索 → 规范化结果。
 
@@ -90,12 +92,17 @@ def search_resources(
     )
     adapter = ProwlarrAdapter(config)
     search_type = search_type_override or intent.search_type
+    query_search_type = (
+        "standard"
+        if search_type == "all" and not can_access_adult
+        else search_type
+    )
 
     search_result = None
     last_result = None
     for kw in keywords:
         result = adapter.search(
-            ResourceSearchRequest(query=kw, search_type=search_type, limit=50)
+            ResourceSearchRequest(query=kw, search_type=query_search_type, limit=50)
         )
         last_result = result
         if result.error_code:
@@ -131,6 +138,12 @@ def search_resources(
 
     ranker = ResourceCandidateRanker(intent)
     ranked = ranker.rank(search_result.candidates)
+    if not can_access_adult:
+        ranked = [
+            candidate
+            for candidate in ranked
+            if "6000" not in candidate.category.split(",")
+        ]
 
     # 6. 组装响应 — 移除下载凭证，不返前端
     intent_dict_for_cache = {
@@ -155,7 +168,13 @@ def search_resources(
         "intent": intent_dict_for_cache,
     }
     candidates = [
-        _candidate_for_response(c, intent_context=intent_context) for c in ranked
+        _candidate_for_response(
+            c,
+            intent_context=intent_context,
+            owner_user_id=owner_user_id,
+            is_adult=search_type == "adult",
+        )
+        for c in ranked
     ]
 
     return {
@@ -163,7 +182,7 @@ def search_resources(
         "data": {
             "candidates": candidates,
             "query_used": search_result.query_used,
-            "search_type": search_result.search_type,
+            "search_type": search_type,
             "source": search_result.source,
             "message": search_result.message,
             "intent": {
@@ -199,6 +218,7 @@ def submit_download(
     preselected_provider: str | None = None,
     preselected_external_id: str | None = None,
     owner_user_id: str | None = None,
+    can_access_adult: bool = True,
 ) -> dict:
     """提交下载到 qBittorrent，成功后创建持久化下载任务。
 
@@ -207,7 +227,11 @@ def submit_download(
     """
     from media_pilot.repository.repositories import DownloadTaskCreate, DownloadTaskRepository
 
-    cached, _ctx = lookup_candidate(candidate_token)
+    cached, _ctx = lookup_candidate(
+        candidate_token,
+        owner_user_id=owner_user_id,
+        can_access_adult=can_access_adult,
+    )
     if cached is None:
         return {
             "status": "error",
@@ -381,7 +405,13 @@ def _make_raw_intent(user_input: str):
     )
 
 
-def _candidate_for_response(c, intent_context: dict | None = None) -> dict:
+def _candidate_for_response(
+    c,
+    intent_context: dict | None = None,
+    *,
+    owner_user_id: str | None = None,
+    is_adult: bool = False,
+) -> dict:
     """构建面向前端的候选字典，排除下载凭证字段"""
 
     from media_pilot.resource_discovery.release_tags import (
@@ -389,7 +419,12 @@ def _candidate_for_response(c, intent_context: dict | None = None) -> dict:
         parse_release_tags,
     )
 
-    token = store_candidate(c, intent_context=intent_context)
+    token = store_candidate(
+        c,
+        intent_context=intent_context,
+        owner_user_id=owner_user_id,
+        is_adult=is_adult,
+    )
 
     # 计算 display_tags：从 release_tags 或实时解析标题
     display_tags: list[str] = []

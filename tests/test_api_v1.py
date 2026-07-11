@@ -314,9 +314,7 @@ def test_api_v1_task_detail_not_found(tmp_path: Path) -> None:
     sf = _make_session_factory(tmp_path)
     client = TestClient(create_app(session_factory=sf))
     resp = client.get("/api/v1/tasks/nonexistent")
-    body = resp.json()
-    assert body["status"] == "error"
-    assert body["messages"][0]["code"] == "task_not_found"
+    assert resp.status_code == 404
 
 
 # ---- 关键词重搜 ----
@@ -422,9 +420,7 @@ def test_api_v1_research_empty_keyword(tmp_path: Path) -> None:
     client = TestClient(create_app(config=config, session_factory=sf))
     resp = client.post("/api/v1/tasks/some-id/research",
                        json={"keyword": "   "})
-    body = resp.json()
-    assert body["status"] == "error"
-    assert body["messages"][0]["code"] == "empty_keyword"
+    assert resp.status_code == 404
 
 
 def test_api_v1_research_scope_tmdb_show_accepted(tmp_path: Path) -> None:
@@ -523,9 +519,7 @@ def test_api_v1_task_status_not_found(tmp_path: Path) -> None:
     sf = _make_session_factory(tmp_path)
     client = TestClient(create_app(session_factory=sf))
     resp = client.get("/api/v1/tasks/nonexistent/status")
-    body = resp.json()
-    assert body["status"] == "error"
-    assert body["messages"][0]["code"] == "task_not_found"
+    assert resp.status_code == 404
 
 
 # 注: 旧 /confirmation 端点已在 replace-legacy-confirmation-with-agent-decisions

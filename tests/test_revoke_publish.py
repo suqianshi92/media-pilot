@@ -210,10 +210,7 @@ def test_check_revoke_publish_nonexistent_task(tmp_path: Path):
 
     client = TestClient(app)
     resp = client.get("/api/v1/tasks/nonexistent-id/revoke-publish")
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["status"] == "error"
-    assert data["data"]["allowed"] is False
+    assert resp.status_code == 404
 
 
 # ── 执行测试 ──

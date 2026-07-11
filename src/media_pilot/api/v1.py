@@ -3,13 +3,19 @@
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from media_pilot.api.auth_dependencies import TaskAccessDep
+from media_pilot.api.auth_dependencies import (
+    CurrentAuthDep,
+    TaskAccessDep,
+    require_authorized_agent_decision,
+    require_authorized_download_task,
+    require_authorized_ingest_task,
+)
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
 from media_pilot.api.task_dtos import (
     DownloadDetailDto,
@@ -361,7 +367,10 @@ def list_flows(
     )
 
 
-@router.post("/downloads/{download_id}/delete")
+@router.post(
+    "/downloads/{download_id}/delete",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def delete_download(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -413,7 +422,10 @@ def delete_download(
     )
 
 
-@router.post("/downloads/{download_id}/retry-sync")
+@router.post(
+    "/downloads/{download_id}/retry-sync",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def retry_download_sync(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -449,7 +461,10 @@ def retry_download_sync(
     )
 
 
-@router.get("/downloads/{download_id}")
+@router.get(
+    "/downloads/{download_id}",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def download_detail(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -510,7 +525,10 @@ def download_detail(
     )
 
 
-@router.post("/downloads/{download_id}/pause")
+@router.post(
+    "/downloads/{download_id}/pause",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def pause_download(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -518,7 +536,10 @@ def pause_download(
     return _toggle_download(download_id, request, action="pause")
 
 
-@router.post("/downloads/{download_id}/resume")
+@router.post(
+    "/downloads/{download_id}/resume",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def resume_download(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -582,7 +603,10 @@ def _toggle_download(
     )
 
 
-@router.post("/downloads/{download_id}/refresh")
+@router.post(
+    "/downloads/{download_id}/refresh",
+    dependencies=[Depends(require_authorized_download_task)],
+)
 def refresh_download(
     download_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -624,7 +648,10 @@ def refresh_download(
     )
 
 
-@router.post("/tasks/{task_id}/delete")
+@router.post(
+    "/tasks/{task_id}/delete",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def delete_task(
     task_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -673,7 +700,10 @@ def delete_task(
     )
 
 
-@router.get("/tasks/{task_id}")
+@router.get(
+    "/tasks/{task_id}",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def task_detail(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """任务详情，返回前端详情页所需的所有结构化字段"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -787,7 +817,10 @@ def task_detail(task_id: str, request: Request) -> ApiEnvelope[dict]:
     )
 
 
-@router.get("/tasks/{task_id}/assets/{asset_role}")
+@router.get(
+    "/tasks/{task_id}/assets/{asset_role}",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def task_asset(task_id: str, asset_role: str, request: Request) -> FileResponse:
     """返回任务已登记的受控图片资产。"""
     mapped_role = _TASK_ASSET_ROLE_MAP.get(asset_role)
@@ -833,7 +866,10 @@ def task_asset(task_id: str, asset_role: str, request: Request) -> FileResponse:
     )
 
 
-@router.get("/tasks/{task_id}/status")
+@router.get(
+    "/tasks/{task_id}/status",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def task_status(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """任务状态轮询 — 返回轻量 TaskStatusSummary"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -869,7 +905,10 @@ def task_status(task_id: str, request: Request) -> ApiEnvelope[dict]:
     )
 
 
-@router.post("/tasks/{task_id}/research")
+@router.post(
+    "/tasks/{task_id}/research",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def research_candidates(
     task_id: str,
     body: ResearchKeywordRequest,
@@ -1002,7 +1041,10 @@ def research_candidates(
 _MANUAL_PROCESSABLE_STATUSES = frozenset({"discovered", "created", "queued"})
 
 
-@router.post("/tasks/{task_id}/process")
+@router.post(
+    "/tasks/{task_id}/process",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def process_task(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """触发任务处理 — 对 discovered/created/queued 任务启动 Agent 运行。
 
@@ -1078,7 +1120,10 @@ def process_task(task_id: str, request: Request) -> ApiEnvelope[dict]:
 # ── 撤销发布 ──
 
 
-@router.get("/tasks/{task_id}/revoke-publish")
+@router.get(
+    "/tasks/{task_id}/revoke-publish",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def check_revoke(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """预检任务撤销发布条件"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1114,7 +1159,10 @@ def check_revoke(task_id: str, request: Request) -> ApiEnvelope[dict]:
     )
 
 
-@router.post("/tasks/{task_id}/revoke-publish")
+@router.post(
+    "/tasks/{task_id}/revoke-publish",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def execute_revoke(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """执行撤销发布"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1163,7 +1211,10 @@ def execute_revoke(task_id: str, request: Request) -> ApiEnvelope[dict]:
     )
 
 
-@router.get("/tasks/{task_id}/delete-input/preview")
+@router.get(
+    "/tasks/{task_id}/delete-input/preview",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def preview_delete_task_input(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """预检删除任务输入 —— 返回目标路径和安全性结果，不执行删除。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1195,7 +1246,10 @@ def preview_delete_task_input(task_id: str, request: Request) -> ApiEnvelope[dic
     )
 
 
-@router.post("/tasks/{task_id}/delete-input")
+@router.post(
+    "/tasks/{task_id}/delete-input",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def execute_delete_task_input(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
     """执行删除任务输入 —— 需前端二次确认后调用。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1238,7 +1292,10 @@ def execute_delete_task_input(task_id: str, body: dict, request: Request) -> Api
     )
 
 
-@router.post("/tasks/{task_id}/manual-select")
+@router.post(
+    "/tasks/{task_id}/manual-select",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
     """人工辅助检索选择元数据候选。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1321,7 +1378,10 @@ def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnv
     )
 
 
-@router.post("/tasks/{task_id}/publish-without-metadata")
+@router.post(
+    "/tasks/{task_id}/publish-without-metadata",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def publish_task_without_metadata(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
     """显式确认后执行无元数据入库。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1492,7 +1552,10 @@ def publish_task_without_metadata(task_id: str, body: dict, request: Request) ->
 # ── Agent Run ───────────────────────────────────────────────────────
 
 
-@router.post("/tasks/{task_id}/agent-runs/stream")
+@router.post(
+    "/tasks/{task_id}/agent-runs/stream",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 async def create_agent_run_stream(task_id: str, request: Request):
     """为通用 Agent 输入创建流式 AgentRun，通过 SSE 返回实时事件。
 
@@ -1599,7 +1662,10 @@ async def create_agent_run_stream(task_id: str, request: Request):
     )
 
 
-@router.post("/tasks/{task_id}/agent-runs")
+@router.post(
+    "/tasks/{task_id}/agent-runs",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 async def create_agent_run(task_id: str, request: Request) -> ApiEnvelope[dict]:
     """手动触发 Agent Run — 为指定任务创建并执行一次 AgentRun。
 
@@ -1751,7 +1817,10 @@ async def create_agent_run(task_id: str, request: Request) -> ApiEnvelope[dict]:
     )
 
 
-@router.post("/tasks/{task_id}/agent-runs/recover-stuck")
+@router.post(
+    "/tasks/{task_id}/agent-runs/recover-stuck",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 async def recover_stuck_agent_run_endpoint(
     task_id: str, request: Request,
 ) -> ApiEnvelope[dict]:
@@ -1829,7 +1898,10 @@ async def recover_stuck_agent_run_endpoint(
     )
 
 
-@router.get("/tasks/{task_id}/agent-decisions")
+@router.get(
+    "/tasks/{task_id}/agent-decisions",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def list_agent_decisions(task_id: str, request: Request) -> ApiEnvelope[list[dict]]:
     """返回指定任务的 pending decisions。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1867,9 +1939,15 @@ def list_agent_decisions(task_id: str, request: Request) -> ApiEnvelope[list[dic
     return ApiEnvelope(status="success", data=data, messages=[], meta={})
 
 
-@router.post("/agent-decisions/{decision_id}/reply")
+@router.post(
+    "/agent-decisions/{decision_id}/reply",
+    dependencies=[Depends(require_authorized_agent_decision)],
+)
 def reply_to_agent_decision(
-    decision_id: str, body: dict, request: Request
+    decision_id: str,
+    body: dict,
+    request: Request,
+    auth: CurrentAuthDep,
 ) -> ApiEnvelope[dict]:
     """用户回复 pending decision 并继续 AgentRun。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -1885,6 +1963,8 @@ def reply_to_agent_decision(
     from media_pilot.services.decision_reply import ReplyInput, reply_to_decision
 
     option_id = body.get("option_id")
+    if option_id == "overwrite_target" and auth.user.role != "admin":
+        raise HTTPException(status_code=403, detail="Administrator access required")
     free_text = body.get("free_text")
     decided_by = body.get("decided_by", "user")
 
@@ -1986,7 +2066,10 @@ def reply_to_agent_decision(
     )
 
 
-@router.get("/tasks/{task_id}/agent-messages")
+@router.get(
+    "/tasks/{task_id}/agent-messages",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def list_agent_messages(task_id: str, request: Request) -> ApiEnvelope[list[dict]]:
     """返回任务的 Agent 对话消息（不含 system prompt）。"""
     session_factory: sessionmaker[Session] | None = getattr(
@@ -2023,7 +2106,10 @@ def list_agent_messages(task_id: str, request: Request) -> ApiEnvelope[list[dict
     return ApiEnvelope(status="success", data=data, messages=[], meta={})
 
 
-@router.get("/tasks/{task_id}/agent-tool-calls")
+@router.get(
+    "/tasks/{task_id}/agent-tool-calls",
+    dependencies=[Depends(require_authorized_ingest_task)],
+)
 def list_agent_tool_calls(task_id: str, request: Request) -> ApiEnvelope[list[dict]]:
     """返回任务的 Agent 工具调用记录（只读，用于展开调试详情）。
 

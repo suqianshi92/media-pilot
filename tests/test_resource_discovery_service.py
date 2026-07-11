@@ -38,6 +38,34 @@ def _make_config(*, llm_configured: bool = True) -> AppConfig:
 
 
 class TestResourceDiscoveryService:
+    @patch("media_pilot.services.resource_discovery.ProwlarrAdapter")
+    def test_all_search_without_adult_permission_excludes_adult_category(
+        self,
+        mock_prowlarr,
+    ):
+        from media_pilot.services.resource_discovery import search_resources
+
+        adapter = MagicMock()
+        adapter.search.return_value = ResourceSearchResult(
+            candidates=[],
+            source="prowlarr",
+            query_used="movie",
+            search_type="standard",
+            message="not found",
+        )
+        mock_prowlarr.return_value = adapter
+
+        result = search_resources(
+            "movie",
+            _make_config(),
+            search_type_override="all",
+            skip_intent=True,
+            can_access_adult=False,
+        )
+
+        assert adapter.search.call_args.args[0].search_type == "standard"
+        assert result["data"]["search_type"] == "all"
+
     def test_llm_not_configured_returns_error(self):
         """LLM 未配置时返回错误，不调用 Prowlarr"""
         from media_pilot.services.resource_discovery import search_resources
@@ -487,6 +515,8 @@ class TestDownloadService:
         token = _store_candidate(
             candidate,
             intent_context={"search_type": "adult"},
+            owner_user_id="user-1",
+            is_adult=True,
         )
 
         mock_adapter = MagicMock()

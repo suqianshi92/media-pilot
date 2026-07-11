@@ -81,6 +81,17 @@ class IngestTaskRepository:
     def get(self, task_id: str) -> IngestTask | None:
         return self._session.get(IngestTask, task_id)
 
+    def get_authorized(
+        self,
+        task_id: str,
+        access_scope: TaskAccessScope,
+    ) -> IngestTask | None:
+        statement = restrict_ingest_tasks(
+            select(IngestTask).where(IngestTask.id == task_id),
+            access_scope,
+        )
+        return self._session.scalars(statement).first()
+
     def get_by_source_path(self, source_path: str) -> IngestTask | None:
         statement = select(IngestTask).where(IngestTask.source_path == source_path)
         return self._session.scalars(statement).first()

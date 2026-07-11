@@ -28,6 +28,7 @@ _CATEGORY_MAP: dict[str, list[int]] = {
     "show": [5000],
     "adult": [6000],
     "all": [2000, 5000, 6000],
+    "standard": [2000, 5000],
 }
 
 
@@ -213,6 +214,13 @@ class ProwlarrAdapter:
         for item in items:
             title = item.get("title", "")
             tags = parse_release_tags(title)
+            raw_categories = item.get("categories") or []
+            category_ids = [
+                str(category.get("id", ""))
+                if isinstance(category, dict)
+                else str(category)
+                for category in raw_categories
+            ]
             result.append(
                 ResourceCandidate(
                     title=title,
@@ -225,6 +233,7 @@ class ProwlarrAdapter:
                     leechers=item.get("leechers", 0),
                     publish_date=item.get("publishDate"),
                     download_count=item.get("grabs", 0) or item.get("downloadCount", 0),
+                    category=",".join(category_ids),
                     release_tags=asdict(tags),
                 )
             )

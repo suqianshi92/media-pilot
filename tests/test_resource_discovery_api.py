@@ -5,8 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from fastapi.testclient import TestClient as RawTestClient
+
+from media_pilot.accounts.passwords import hash_password
 from media_pilot.app import create_app
 from media_pilot.config import AppConfig
+from media_pilot.repository.account_repositories import UserRepository
 from media_pilot.resource_discovery.types import ResourceCandidate, ResourceSearchResult
 from tests.auth_helpers import AuthenticatedTestClient as TestClient
 
@@ -122,3 +126,42 @@ def test_resource_download_uses_authenticated_user_as_task_owner(
 
     assert response.status_code == 200
     assert captured["owner_user_id"] == current_user_id
+
+
+def test_user_without_adult_permission_cannot_search_adult_resources(
+    tmp_path: Path,
+) -> None:
+    app = create_app(config=_make_config(tmp_path))
+    admin_client = TestClient(app)
+    with app.state.session_factory() as session:
+        UserRepository(session).create_user(
+            username="Alice",
+            password_hash=hash_password("alice password"),
+        )
+        session.commit()
+
+    client = RawTestClient(app)
+    client.get("/api/v1/auth/status")
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "alice password"},
+        headers={"X-CSRF-Token": client.cookies["media_pilot_csrf"]},
+    )
+    assert login.status_code == 200
+    client.headers["X-CSRF-Token"] = client.cookies["media_pilot_csrf"]
+
+    response = client.post(
+        "/api/v1/resource-discovery/search",
+        json={"input_text": "adult movie", "search_type": "adult"},
+    )
+
+    assert response.status_code == 403
+    identify_response = client.post(
+        "/api/v1/resource-discovery/identify",
+        json={
+            "profile": "tpdb_adult_movie",
+            "keyword": "adult:123",
+        },
+    )
+    assert identify_response.status_code == 403
+    assert admin_client.get("/api/v1/auth/me").status_code == 200

@@ -384,7 +384,4 @@ class TestDownloadEndpoints:
         sf = self._make_session_factory(tmp_path)
         client = TestClient(create_app(session_factory=sf))
         resp = client.get("/api/v1/downloads/nonexistent")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "error"
-        assert data["messages"][0]["code"] == "not_found"
+        assert resp.status_code == 404

@@ -15,7 +15,11 @@ from media_pilot.accounts.cookies import (
 from media_pilot.accounts.session_service import SessionService
 from media_pilot.accounts.task_access import TaskAccessScope
 from media_pilot.repository.account_repositories import UserRepository
-from media_pilot.repository.models import AccountSession, User
+from media_pilot.repository.models import AccountSession, AgentDecisionRequest, User
+from media_pilot.repository.repositories import (
+    DownloadTaskRepository,
+    IngestTaskRepository,
+)
 
 
 def get_session_factory(request: Request) -> sessionmaker[Session]:
@@ -99,3 +103,43 @@ def get_task_access_scope(auth: CurrentAuthDep) -> TaskAccessScope:
 
 
 TaskAccessDep = Annotated[TaskAccessScope, Depends(get_task_access_scope)]
+
+
+def require_authorized_ingest_task(
+    task_id: str,
+    session_factory: SessionFactoryDep,
+    access_scope: TaskAccessDep,
+) -> None:
+    with session_factory() as session:
+        if IngestTaskRepository(session).get_authorized(task_id, access_scope) is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+
+def require_authorized_download_task(
+    download_id: str,
+    session_factory: SessionFactoryDep,
+    access_scope: TaskAccessDep,
+) -> None:
+    with session_factory() as session:
+        if (
+            DownloadTaskRepository(session).get_authorized(
+                download_id,
+                access_scope,
+            )
+            is None
+        ):
+            raise HTTPException(status_code=404, detail="Download task not found")
+
+
+def require_authorized_agent_decision(
+    decision_id: str,
+    session_factory: SessionFactoryDep,
+    access_scope: TaskAccessDep,
+) -> None:
+    with session_factory() as session:
+        decision = session.get(AgentDecisionRequest, decision_id)
+        if decision is None or IngestTaskRepository(session).get_authorized(
+            decision.task_id,
+            access_scope,
+        ) is None:
+            raise HTTPException(status_code=404, detail="Decision not found")
