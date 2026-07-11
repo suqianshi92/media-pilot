@@ -19,6 +19,7 @@ import { SettingsPage } from '@/pages/settings-page'
 import { TaskDetailPage } from '@/pages/task-detail-page'
 import { TaskListPage } from '@/pages/task-list-page'
 import { UserManagementPage } from '@/pages/user-management-page'
+import { AccountPage } from '@/pages/account-page'
 
 function ProtectedRoute() {
   const auth = useAuth()
@@ -34,6 +35,12 @@ function ProtectedRoute() {
 
 function AuthRoot() {
   return <AuthProvider><Outlet /></AuthProvider>
+}
+
+function AdminRoute() {
+  const { user } = useAuth()
+  if (user?.role !== 'admin') return <div role="alert" className="p-6">无权访问此页面</div>
+  return <Outlet />
 }
 
 const routes: RouteObject[] = [
@@ -68,13 +75,13 @@ const routes: RouteObject[] = [
         element: <DownloadDetailPage />,
       },
       {
-        path: 'settings',
-        element: <SettingsPage />,
+        path: 'account',
+        element: <AccountPage />,
       },
-      {
-        path: 'users',
-        element: <UserManagementPage />,
-      },
+      { element: <AdminRoute />, children: [
+        { path: 'settings', element: <SettingsPage /> },
+        { path: 'users', element: <UserManagementPage /> },
+      ] },
       {
         path: '*',
         element: <NotFoundPage />,

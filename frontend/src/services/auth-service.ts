@@ -29,5 +29,14 @@ export function createAuthService() {
     login: (username: string, password: string) =>
       request<{ user: AuthUser }>('/login', credentials(username, password)),
     logout: () => request<Record<string, never>>('/logout', { method: 'POST' }),
+    changePassword: (currentPassword: string, newPassword: string) =>
+      request<Record<string, never>>('/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      }),
   }
 }

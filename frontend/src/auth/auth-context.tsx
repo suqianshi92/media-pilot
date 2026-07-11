@@ -10,6 +10,7 @@ interface AuthContextValue {
   initialize(username: string, password: string): Promise<void>
   login(username: string, password: string): Promise<void>
   logout(): Promise<void>
+  changePassword(currentPassword: string, newPassword: string): Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -56,6 +57,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     },
     async logout() {
       await service.logout(); setUser(null); setState('anonymous')
+    },
+    async changePassword(currentPassword, newPassword) {
+      await service.changePassword(currentPassword, newPassword)
+      setUser(null); setState('anonymous')
     },
   }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
