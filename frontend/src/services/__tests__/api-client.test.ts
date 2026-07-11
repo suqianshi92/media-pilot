@@ -16,7 +16,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, createApiTaskService } from '@/services/api-client'
+import { ApiError, apiFetch, createApiTaskService } from '@/services/api-client'
 
 interface MockResponseInit {
   status?: number
@@ -97,6 +97,16 @@ describe('createApiTaskService().replyToAgentDecision envelope contract', () => 
     const init = vi.mocked(fetch).mock.calls[0][1]
     expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('csrf-token-123')
     expect(init?.credentials).toBe('same-origin')
+  })
+
+  it('broadcasts session expiry on a 401 response', async () => {
+    const expired = vi.fn()
+    window.addEventListener('media-pilot:unauthorized', expired, { once: true })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 401 }))
+
+    await apiFetch('/api/v1/tasks')
+
+    expect(expired).toHaveBeenCalledOnce()
   })
 
   it('cancel_publish success: data.status=target_conflict_cancelled must not throw', async () => {

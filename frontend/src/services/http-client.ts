@@ -17,9 +17,11 @@ export async function apiFetch(
     const csrfToken = readCookie('media_pilot_csrf')
     if (csrfToken) headers.set('X-CSRF-Token', csrfToken)
   }
-  return fetch(input, {
+  const response = await fetch(input, {
     ...init,
     credentials: 'same-origin',
     headers,
   })
+  if (response.status === 401) window.dispatchEvent(new Event('media-pilot:unauthorized'))
+  return response
 }
