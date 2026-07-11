@@ -1,4 +1,5 @@
 import type { ApiEnvelope } from '@/types/api'
+import { apiFetch } from '@/services/http-client'
 import type {
   AppSettingsResponse,
   AppSettingsUpdateRequest,
@@ -9,7 +10,7 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function apiGet<T>(path: string): Promise<T> {
   const url = `${BASE_URL}/api/v1${path}`
-  const resp = await fetch(url)
+  const resp = await apiFetch(url)
   const body = await resp.json()
   if (body.status === 'error') {
     const msg = body.messages?.[0]?.text ?? 'unknown error'
@@ -20,7 +21,7 @@ async function apiGet<T>(path: string): Promise<T> {
 
 async function apiPut<T>(path: string, data: unknown): Promise<T> {
   const url = `${BASE_URL}/api/v1${path}`
-  const resp = await fetch(url, {
+  const resp = await apiFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

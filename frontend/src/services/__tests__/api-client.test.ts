@@ -81,6 +81,24 @@ describe('createApiTaskService().replyToAgentDecision envelope contract', () => 
     expect(envelope.data.status).toBe('target_conflict_overwritten')
   })
 
+  it('adds the CSRF cookie to every state-changing request', async () => {
+    document.cookie = 'media_pilot_csrf=csrf-token-123; path=/'
+    _mockFetchOnce({
+      body: { status: 'success', data: { status: 'completed' }, messages: [], meta: {} },
+    })
+
+    await createApiTaskService().replyToAgentDecision(
+      'decision-csrf',
+      'continue',
+      undefined,
+      'user',
+    )
+
+    const init = vi.mocked(fetch).mock.calls[0][1]
+    expect(new Headers(init?.headers).get('X-CSRF-Token')).toBe('csrf-token-123')
+    expect(init?.credentials).toBe('same-origin')
+  })
+
   it('cancel_publish success: data.status=target_conflict_cancelled must not throw', async () => {
     _mockFetchOnce({
       status: 200,

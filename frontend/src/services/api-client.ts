@@ -24,6 +24,9 @@ import type {
   TaskSummary,
 } from '@/types/task'
 import { createSettingsService } from '@/services/settings-service'
+import { apiFetch } from '@/services/http-client'
+
+export { apiFetch } from '@/services/http-client'
 
 export type TaskFilter = TaskSummary['status_summary']['status'] | 'all'
 
@@ -81,7 +84,7 @@ async function apiGet<T>(path: string, params?: Record<string, string>): Promise
       if (v) url.searchParams.set(k, v)
     })
   }
-  const resp = await fetch(url.toString())
+  const resp = await apiFetch(url.toString())
   if (!resp.ok) {
     // 5xx / 4xx — 尝试解析 ApiEnvelope, 失败则用 HTTP 状态码兜底.
     let body: any = null
@@ -101,7 +104,7 @@ async function apiGet<T>(path: string, params?: Record<string, string>): Promise
 
 async function apiPost<T>(path: string, data: unknown): Promise<T> {
   const url = `${BASE_URL}/api/v1${path}`
-  const resp = await fetch(url, {
+  const resp = await apiFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -128,7 +131,7 @@ async function streamPost(
   onEvent: (event: string, payload: any) => void,
 ): Promise<void> {
   const url = `${BASE_URL}/api/v1${path}`
-  const resp = await fetch(url, {
+  const resp = await apiFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),

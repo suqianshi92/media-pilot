@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { apiFetch } from '@/services/http-client'
 import i18n from '@/i18n'
 import { Search, Download, Loader2, Scan, RotateCcw, Send, Sparkles } from 'lucide-react'
 import type { ContentDiscoveryMessage, ResourceCandidate, ResourceIntent } from '@/types/discovery'
@@ -233,7 +234,7 @@ export function DiscoveryPage({ service = defaultService }: DiscoveryPageProps) 
     setIdentifyState(token, { keyword, loading: true, error: null, candidates: [], selected: null })
 
     try {
-      const resp = await fetch('/api/v1/resource-discovery/identify', {
+      const resp = await apiFetch('/api/v1/resource-discovery/identify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

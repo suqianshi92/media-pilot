@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { apiFetch } from '@/services/http-client'
 import type { TFunction } from 'i18next'
 import { Bot, ChevronDown, ChevronUp, Loader2, RefreshCw, Send } from 'lucide-react'
 
@@ -940,7 +941,7 @@ function FreeformInput({
 
       let response: Response
       try {
-        response = await fetch(streamUrl, {
+        response = await apiFetch(streamUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message }),

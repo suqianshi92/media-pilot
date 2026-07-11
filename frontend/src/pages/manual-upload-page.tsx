@@ -1,5 +1,6 @@
 import { useReducer, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { apiFetch } from '@/services/http-client'
 
 import { EmptyState, PageShell } from '@/components/app/shared-ui'
 import { MetadataCandidateCard, type MetadataCardCandidate } from '@/components/shared/metadata-candidate-card'
@@ -104,7 +105,7 @@ async function apiParseUpload(torrents: File[], magnets: string) {
   const form = new FormData()
   torrents.forEach((f) => form.append('torrents', f))
   form.append('magnets', magnets)
-  const resp = await fetch(`${BASE_URL}/api/v1/manual-upload/parse`, {
+  const resp = await apiFetch(`${BASE_URL}/api/v1/manual-upload/parse`, {
     method: 'POST',
     body: form,
   })
@@ -124,7 +125,7 @@ export async function apiSubmitUpload(items: UploadItem[]) {
       preselected_external_id: it.preselectedExternalId,
     })),
   }
-  const resp = await fetch(`${BASE_URL}/api/v1/manual-upload/submit`, {
+  const resp = await apiFetch(`${BASE_URL}/api/v1/manual-upload/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -133,7 +134,7 @@ export async function apiSubmitUpload(items: UploadItem[]) {
 }
 
 async function apiIdentify(keyword: string, profile: string) {
-  const resp = await fetch(`${BASE_URL}/api/v1/resource-discovery/identify`, {
+  const resp = await apiFetch(`${BASE_URL}/api/v1/resource-discovery/identify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
