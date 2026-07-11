@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ListTodo, Search, Settings, Upload, X } from 'lucide-react'
+import { LayoutDashboard, ListTodo, Search, Settings, Upload, UserRoundCog, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth/auth-context'
 
@@ -14,12 +14,13 @@ const navKeys = [
   { to: '/manual-upload', icon: Upload, labelKey: 'nav.manualUpload' },
   { to: '/tasks', icon: ListTodo, labelKey: 'nav.taskList' },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
+  { to: '/users', icon: UserRoundCog, labelKey: '用户管理', adminOnly: true },
 ]
 
 export function SidebarNav({ open, onClose }: SidebarNavProps) {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const visibleItems = navKeys.filter((item) => item.to !== '/settings' || user?.role === 'admin')
+  const visibleItems = navKeys.filter((item) => (!('adminOnly' in item) && item.to !== '/settings') || user?.role === 'admin')
 
   return (
     <>
@@ -49,7 +50,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
 
         <nav className="flex flex-col gap-1 px-2 py-3">
           {visibleItems.map((item) => {
-            const label = t(item.labelKey)
+            const label = item.labelKey === '用户管理' ? item.labelKey : t(item.labelKey)
             return (
               <NavLink
                 key={item.to}

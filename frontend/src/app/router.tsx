@@ -18,6 +18,7 @@ import { NotFoundPage } from '@/pages/not-found-page'
 import { SettingsPage } from '@/pages/settings-page'
 import { TaskDetailPage } from '@/pages/task-detail-page'
 import { TaskListPage } from '@/pages/task-list-page'
+import { UserManagementPage } from '@/pages/user-management-page'
 
 function ProtectedRoute() {
   const auth = useAuth()
@@ -69,6 +70,10 @@ const routes: RouteObject[] = [
       {
         path: 'settings',
         element: <SettingsPage />,
+      },
+      {
+        path: 'users',
+        element: <UserManagementPage />,
       },
       {
         path: '*',
