@@ -44,13 +44,19 @@ class ContentDiscoveryInputError(ValueError):
 
 def build_content_discovery_messages(
     messages: list[ContentDiscoveryMessage],
+    *,
+    can_access_adult: bool = True,
 ) -> list[dict[str, str]]:
     if not messages:
         raise ContentDiscoveryInputError("messages must not be empty")
 
-    out: list[dict[str, str]] = [
-        {"role": "system", "content": CONTENT_DISCOVERY_SYSTEM_PROMPT}
-    ]
+    system_prompt = CONTENT_DISCOVERY_SYSTEM_PROMPT
+    if not can_access_adult:
+        system_prompt += (
+            "\n\n当前用户没有成人内容权限。不得推荐成人内容、成人影片或成人资源关键词；"
+            "如果用户明确请求此类内容，应简短拒绝并建议普通电影或剧集。"
+        )
+    out: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     for message in messages:
         role = message.role.strip()
         content = message.content.strip()
@@ -68,13 +74,17 @@ def stream_content_discovery(
     messages: list[ContentDiscoveryMessage] | None = None,
     chat_messages: list[dict[str, str]] | None = None,
     llm_client: AgentLLMClient | None = None,
+    can_access_adult: bool = True,
 ) -> Generator[str, None, None]:
     """Yield SSE chunks for a content discovery turn."""
 
     if chat_messages is None:
         if messages is None:
             raise ContentDiscoveryInputError("messages must not be empty")
-        chat_messages = build_content_discovery_messages(messages)
+        chat_messages = build_content_discovery_messages(
+            messages,
+            can_access_adult=can_access_adult,
+        )
     client = llm_client or AgentLLMClient(config)
 
     try:

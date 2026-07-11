@@ -105,6 +105,45 @@ def get_task_access_scope(auth: CurrentAuthDep) -> TaskAccessScope:
 TaskAccessDep = Annotated[TaskAccessScope, Depends(get_task_access_scope)]
 
 
+def build_stream_authorizer(
+    session_factory: sessionmaker[Session],
+    *,
+    token: str,
+    task_id: str | None = None,
+    require_adult_access: bool = False,
+):
+    """构造流式连接使用的短会话复核函数；每次调用独立获取连接。"""
+
+    def authorize() -> bool:
+        with session_factory() as session:
+            authenticated = SessionService().authenticate(
+                session,
+                token=token,
+                now=datetime.now(UTC),
+            )
+            if authenticated is None:
+                return False
+            if authenticated.renewed:
+                session.commit()
+            user = authenticated.user
+            can_access_adult = user.role == "admin" or user.can_access_adult
+            if require_adult_access and not can_access_adult:
+                return False
+            if task_id is None:
+                return True
+            access_scope = TaskAccessScope(
+                user_id=user.id,
+                can_view_all_tasks=user.role == "admin",
+                can_access_adult=can_access_adult,
+            )
+            return (
+                IngestTaskRepository(session).get_authorized(task_id, access_scope)
+                is not None
+            )
+
+    return authorize
+
+
 def require_authorized_ingest_task(
     task_id: str,
     session_factory: SessionFactoryDep,

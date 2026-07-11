@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from media_pilot.api.auth_dependencies import (
     CurrentAuthDep,
     TaskAccessDep,
+    build_stream_authorizer,
     require_authorized_agent_decision,
     require_authorized_download_task,
     require_authorized_ingest_task,
@@ -1556,7 +1557,11 @@ def publish_task_without_metadata(task_id: str, body: dict, request: Request) ->
     "/tasks/{task_id}/agent-runs/stream",
     dependencies=[Depends(require_authorized_ingest_task)],
 )
-async def create_agent_run_stream(task_id: str, request: Request):
+async def create_agent_run_stream(
+    task_id: str,
+    request: Request,
+    auth: CurrentAuthDep,
+):
     """为通用 Agent 输入创建流式 AgentRun，通过 SSE 返回实时事件。
 
     事件类型: user_message, assistant_delta, assistant_message,
@@ -1651,8 +1656,24 @@ async def create_agent_run_stream(task_id: str, request: Request):
         except Exception:
             pass  # Client disconnected
 
-    return StreamingResponse(
+    from media_pilot.accounts.stream_authorization import (
+        stream_with_periodic_authorization,
+    )
+
+    authorized_events = stream_with_periodic_authorization(
         _event_generator(),
+        authorize=build_stream_authorizer(
+            session_factory,
+            token=auth.token,
+            task_id=task_id,
+        ),
+        authorization_error=(
+            'event: error\ndata: {"error":"authorization_revoked"}\n\n'
+        ),
+    )
+
+    return StreamingResponse(
+        authorized_events,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

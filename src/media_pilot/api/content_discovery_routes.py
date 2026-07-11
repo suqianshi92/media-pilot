@@ -6,6 +6,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from media_pilot.accounts.stream_authorization import (
+    stream_with_periodic_authorization,
+)
+from media_pilot.api.auth_dependencies import CurrentAuthDep, build_stream_authorizer
 from media_pilot.config import AppConfig
 from media_pilot.services.content_discovery import (
     ContentDiscoveryInputError,
@@ -28,9 +32,14 @@ class ContentDiscoveryStreamBody(BaseModel):
 
 
 @router.post("/stream")
-def stream(body: ContentDiscoveryStreamBody, request: Request) -> StreamingResponse:
+def stream(
+    body: ContentDiscoveryStreamBody,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> StreamingResponse:
     config: AppConfig | None = getattr(request.app.state, "config", None)
-    if config is None:
+    session_factory = getattr(request.app.state, "session_factory", None)
+    if config is None or session_factory is None:
         return _single_error_stream("未配置服务")
 
     messages = [
@@ -38,12 +47,28 @@ def stream(body: ContentDiscoveryStreamBody, request: Request) -> StreamingRespo
         for message in body.messages
     ]
     try:
-        chat_messages = build_content_discovery_messages(messages)
+        chat_messages = build_content_discovery_messages(
+            messages,
+            can_access_adult=auth.user.can_access_adult,
+        )
     except ContentDiscoveryInputError as exc:
         return _single_error_stream(str(exc))
 
+    source = stream_content_discovery(config=config, chat_messages=chat_messages)
+    authorized_source = stream_with_periodic_authorization(
+        source,
+        authorize=build_stream_authorizer(
+            session_factory,
+            token=auth.token,
+            require_adult_access=auth.user.can_access_adult,
+        ),
+        authorization_error=format_sse(
+            "error",
+            {"message": "authorization_revoked"},
+        ),
+    )
     return StreamingResponse(
-        stream_content_discovery(config=config, chat_messages=chat_messages),
+        authorized_source,
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
