@@ -37,6 +37,19 @@ class UserRepository:
         )
         return self._session.scalars(statement).first()
 
+    def list_page(self, *, offset: int, limit: int) -> tuple[list[User], int]:
+        total = self._session.scalar(select(func.count()).select_from(User)) or 0
+        statement = select(User).order_by(User.created_at, User.id).offset(offset).limit(limit)
+        return list(self._session.scalars(statement)), total
+
+    def set_password(self, user: User, password_hash: str) -> User:
+        user.password_hash = password_hash
+        AccountSessionRepository(self._session).revoke_all_for_user(
+            user.id,
+            now=datetime.now(UTC),
+        )
+        return user
+
     def create_initial_admin(self, *, username: str, password_hash: str) -> User:
         if self.has_users():
             raise AlreadyInitializedError("account system is already initialized")

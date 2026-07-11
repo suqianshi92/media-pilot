@@ -18,6 +18,7 @@ from media_pilot.api.manual_upload_routes import router as manual_upload_router
 from media_pilot.api.public_routes import router as public_router
 from media_pilot.api.resource_discovery_routes import router as resource_discovery_router
 from media_pilot.api.settings_routes import router as settings_router
+from media_pilot.api.user_routes import router as user_router
 from media_pilot.api.v1 import router as api_v1_router
 from media_pilot.config import (
     AdapterMode,
@@ -221,6 +222,7 @@ def create_app(
     app.include_router(manual_upload_router, dependencies=authenticated)
     app.include_router(settings_router, dependencies=admin_only)
     app.include_router(agent_background_router, dependencies=admin_only)
+    app.include_router(user_router, dependencies=admin_only)
 
     # 启动后台任务处理线程，定期扫描并处理 discovered/queued 任务
     if enable_background_processor:

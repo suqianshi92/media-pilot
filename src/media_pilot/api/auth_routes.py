@@ -36,6 +36,11 @@ class CredentialsBody(BaseModel):
         return value
 
 
+class ChangePasswordBody(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 def _user_data(user: User) -> dict[str, object]:
     return {
         "id": user.id,
@@ -127,4 +132,19 @@ def logout(
     )
     auth.session.commit()
     clear_session_cookie(response, secure=request_is_secure(request))
+    return ApiEnvelope(status="success", data={})
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordBody,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
+    if not verify_password(auth.user.password_hash, body.current_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    UserRepository(auth.session).set_password(
+        auth.user,
+        hash_password(body.new_password),
+    )
+    auth.session.commit()
     return ApiEnvelope(status="success", data={})
