@@ -48,6 +48,11 @@ function TaskListRoute() {
   return <TaskListPage showOwner={user?.role === 'admin'} />
 }
 
+function DashboardRoute() {
+  const { user } = useAuth()
+  return <DashboardPage showAdminStatus={user?.role === 'admin'} />
+}
+
 function TaskDetailRoute() {
   const { user } = useAuth()
   return <TaskDetailPage showOwner={user?.role === 'admin'} />
@@ -67,7 +72,7 @@ const routes: RouteObject[] = [
       { element: <ProtectedRoute />, children: [{ path: '/', element: <AppLayout />, children: [
       {
         index: true,
-        element: <DashboardPage />,
+        element: <DashboardRoute />,
       },
       {
         path: 'tasks',

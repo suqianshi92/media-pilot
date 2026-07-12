@@ -28,7 +28,7 @@ function flowDetailHref(flow: FlowSummary) {
   return '#'
 }
 
-export function DashboardPage({ service }: { service?: DashboardService }) {
+export function DashboardPage({ service, showAdminStatus = true }: { service?: DashboardService; showAdminStatus?: boolean }) {
   const svc = service ?? defaultService
   const navigate = useNavigate()
   const { t } = useTranslation()
@@ -108,7 +108,7 @@ export function DashboardPage({ service }: { service?: DashboardService }) {
         }
       />
 
-      <BackgroundAgentCard service={svc} />
+      {showAdminStatus && <BackgroundAgentCard service={svc} />}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard

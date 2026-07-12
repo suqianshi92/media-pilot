@@ -8,7 +8,7 @@ import { createMockTaskService } from '@/mocks/service'
 
 import { DashboardPage, type DashboardService } from './dashboard-page'
 
-function renderDashboard(service: DashboardService = createMockTaskService()) {
+function renderDashboard(service: DashboardService = createMockTaskService(), showAdminStatus = true) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -18,7 +18,7 @@ function renderDashboard(service: DashboardService = createMockTaskService()) {
   render(
     <MemoryRouter initialEntries={['/']}>
       <QueryClientProvider client={queryClient}>
-        <DashboardPage service={service} />
+        <DashboardPage service={service} showAdminStatus={showAdminStatus} />
       </QueryClientProvider>
     </MemoryRouter>,
   )
@@ -29,6 +29,12 @@ afterEach(() => {
 })
 
 describe('DashboardPage', () => {
+  it('hides administrator diagnostics for normal users', async () => {
+    renderDashboard(createMockTaskService(), false)
+    await screen.findByText('首页概览')
+    expect(screen.queryByText('后台 Agent')).not.toBeInTheDocument()
+  })
+
   it('renders stat cards with counts', async () => {
     renderDashboard()
 
