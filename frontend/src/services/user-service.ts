@@ -1,5 +1,7 @@
 import { apiFetch } from '@/services/http-client'
 
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 export interface ManagedUser {
   id: string
   username: string
@@ -16,7 +18,7 @@ interface UserEnvelope {
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(`/api/v1/users${path}`, init)
+  const response = await apiFetch(`${BASE_URL}/api/v1/users${path}`, init)
   const body = await response.json()
   if (!response.ok) throw new Error(body.detail ?? '请求失败')
   return body as T

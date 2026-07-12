@@ -57,7 +57,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(result.user); setState('authenticated')
     },
     async logout() {
-      await service.logout(); abortAuthenticatedRequests(); setUser(null); setState('anonymous')
+      try {
+        await service.logout()
+      } catch {
+        // 服务端会话可能已经过期或网络不可用；本地退出仍必须完成。
+      }
+      abortAuthenticatedRequests(); setUser(null); setState('anonymous')
     },
     async changePassword(currentPassword, newPassword) {
       await service.changePassword(currentPassword, newPassword)
