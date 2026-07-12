@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
 import { createAuthService, type AuthUser } from '@/services/auth-service'
+import { abortAuthenticatedRequests } from '@/services/http-client'
 
 type AuthState = 'loading' | 'uninitialized' | 'anonymous' | 'authenticated'
 
@@ -56,10 +57,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(result.user); setState('authenticated')
     },
     async logout() {
-      await service.logout(); setUser(null); setState('anonymous')
+      await service.logout(); abortAuthenticatedRequests(); setUser(null); setState('anonymous')
     },
     async changePassword(currentPassword, newPassword) {
       await service.changePassword(currentPassword, newPassword)
+      abortAuthenticatedRequests()
       setUser(null); setState('anonymous')
     },
   }

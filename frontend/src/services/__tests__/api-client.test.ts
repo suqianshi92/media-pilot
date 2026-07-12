@@ -17,6 +17,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError, apiFetch, createApiTaskService } from '@/services/api-client'
+import { abortAuthenticatedRequests } from '@/services/http-client'
 
 interface MockResponseInit {
   status?: number
@@ -107,6 +108,19 @@ describe('createApiTaskService().replyToAgentDecision envelope contract', () => 
     await apiFetch('/api/v1/tasks')
 
     expect(expired).toHaveBeenCalledOnce()
+  })
+
+  it('aborts requests started by the current browser session on logout', async () => {
+    let captured: AbortSignal | null = null
+    vi.spyOn(globalThis, 'fetch').mockImplementationOnce((_input, init) => {
+      captured = init?.signal as AbortSignal
+      return Promise.resolve(new Response('{}', { status: 200 }))
+    })
+    await apiFetch('/api/v1/tasks')
+
+    abortAuthenticatedRequests()
+
+    expect((captured as unknown as AbortSignal).aborted).toBe(true)
   })
 
   it('cancel_publish success: data.status=target_conflict_cancelled must not throw', async () => {

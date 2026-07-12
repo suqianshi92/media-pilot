@@ -7,6 +7,13 @@ function readCookie(name: string): string | null {
   return null
 }
 
+let authenticatedRequests = new AbortController()
+
+export function abortAuthenticatedRequests() {
+  authenticatedRequests.abort()
+  authenticatedRequests = new AbortController()
+}
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -21,6 +28,7 @@ export async function apiFetch(
     ...init,
     credentials: 'same-origin',
     headers,
+    signal: init.signal ?? authenticatedRequests.signal,
   })
   if (response.status === 401) window.dispatchEvent(new Event('media-pilot:unauthorized'))
   return response
