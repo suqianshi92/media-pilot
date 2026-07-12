@@ -14,6 +14,7 @@ import { TaskListPage, type TaskListService } from './task-list-page'
 function renderTaskListPage(
   service: TaskListService = createMockTaskService(),
   initialPath = '/tasks',
+  showOwner = false,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -27,7 +28,7 @@ function renderTaskListPage(
     <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <TaskListPage service={service} />
+          <TaskListPage service={service} showOwner={showOwner} />
         </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -48,6 +49,16 @@ afterEach(() => {
 })
 
 describe('TaskListPage', () => {
+  it('shows the creator column only for administrators', async () => {
+    renderTaskListPage(createMockTaskService(), '/tasks', true)
+    await waitFor(() => expect(screen.getByText('创建者')).toBeInTheDocument())
+
+    cleanup()
+    renderTaskListPage()
+    await waitFor(() => expect(getStatusFilterSelect()).toBeInTheDocument())
+    expect(screen.queryByText('创建者')).not.toBeInTheDocument()
+  })
+
   it('renders stats summary cards and status filter dropdown', async () => {
     renderTaskListPage()
 
