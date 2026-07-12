@@ -85,22 +85,21 @@ describe('DashboardPage', () => {
     })
   })
 
-  it('download-only items in recent flows are not clickable', async () => {
+  it('download-only items in recent flows link to download details', async () => {
     renderDashboard()
 
     await waitFor(() => {
       expect(screen.getByText('最近流程')).toBeInTheDocument()
     })
 
-    // 纯下载流程项（有 download_task 但无 ingest_task_id）不应有 cursor-pointer
-    // 它们渲染出来但不响应点击跳转
+    // download-only 流程现在有独立下载详情页，应可点击跳转。
     const flowItems = document.querySelectorAll('.divide-y > div')
     const downloadOnlyItem = Array.from(flowItems).find((el) =>
       el.textContent?.includes('下载中') || el.textContent?.includes('等待下载器同步'),
     )
-    // 如果有下载流程项，验证它没有 cursor-pointer 样式
+    // 如果有下载流程项，验证它使用可点击样式。
     if (downloadOnlyItem) {
-      expect(downloadOnlyItem.className).not.toContain('cursor-pointer')
+      expect(downloadOnlyItem.className).toContain('cursor-pointer')
     }
   })
 

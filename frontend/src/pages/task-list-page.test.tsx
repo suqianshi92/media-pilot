@@ -182,12 +182,12 @@ describe('TaskListPage', () => {
 
     await user.selectOptions(getStatusFilterSelect(), 'waiting_user')
     await waitFor(() => {
-      expect(screen.getAllByText('共 5 条').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('共 4 条').length).toBeGreaterThan(0)
     })
 
     await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
     await waitFor(() => {
-      expect(screen.getAllByText('共 2 条').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('共 3 条').length).toBeGreaterThan(0)
     })
   })
 
@@ -438,13 +438,13 @@ describe('TaskListPage', () => {
     renderTaskListPage(createMockTaskService(), '/tasks?filter=waiting_user')
 
     await waitFor(() => {
-      expect(screen.getAllByText('共 5 条').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('共 4 条').length).toBeGreaterThan(0)
     })
 
     // 用户切换到"已完成"
     await user.selectOptions(getStatusFilterSelect(), 'library_import_complete')
     await waitFor(() => {
-      expect(screen.getAllByText('共 2 条').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('共 3 条').length).toBeGreaterThan(0)
     })
   })
 
