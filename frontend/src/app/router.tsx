@@ -48,6 +48,16 @@ function TaskListRoute() {
   return <TaskListPage showOwner={user?.role === 'admin'} />
 }
 
+function TaskDetailRoute() {
+  const { user } = useAuth()
+  return <TaskDetailPage showOwner={user?.role === 'admin'} />
+}
+
+function DownloadDetailRoute() {
+  const { user } = useAuth()
+  return <DownloadDetailPage showOwner={user?.role === 'admin'} />
+}
+
 const routes: RouteObject[] = [
   {
     element: <AuthRoot />,
@@ -65,7 +75,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'tasks/:taskId',
-        element: <TaskDetailPage />,
+        element: <TaskDetailRoute />,
       },
       {
         path: 'discovery',
@@ -77,7 +87,7 @@ const routes: RouteObject[] = [
       },
       {
         path: 'downloads/:downloadId',
-        element: <DownloadDetailPage />,
+        element: <DownloadDetailRoute />,
       },
       {
         path: 'account',

@@ -56,7 +56,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-export function DownloadDetailPage() {
+export function DownloadDetailPage({ showOwner = false }: { showOwner?: boolean }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -234,6 +234,7 @@ export function DownloadDetailPage() {
         {/* 基础信息 */}
         <Section title={t('downloadDetail.basicInfo')}>
           <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+            {showOwner && <DetailRow label="创建者" value={dl.owner_username ?? '系统'} />}
             <DetailRow label={t('downloadDetail.titleLabel')} value={dl.title} />
             <DetailRow label={t('downloadDetail.source')} value={getDownloadSourceLabel(dl.source)} />
             <DetailRow label={t('downloadDetail.savePath')} value={dl.save_path} />

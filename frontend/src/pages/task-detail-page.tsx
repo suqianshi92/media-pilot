@@ -125,7 +125,7 @@ function FileList({ title, files }: { title: string; files: MediaSourceSelection
   )
 }
 
-function BaseInfoSection({ detail }: { detail: TaskDetailDto }) {
+function BaseInfoSection({ detail, showOwner }: { detail: TaskDetailDto; showOwner: boolean }) {
   const { t } = useTranslation()
   const isShow = detail.task.media_type === 'show'
   const mappings = detail.episode_mappings ?? []
@@ -148,6 +148,7 @@ function BaseInfoSection({ detail }: { detail: TaskDetailDto }) {
         <ConfidenceBadge level={detail.task.status_summary.confidence_level} value={detail.task.status_summary.confidence} />
       </div>
       <dl className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {showOwner && <DetailItem label="创建者" value={detail.task.owner_username ?? '系统'} />}
         <DetailItem label={t('taskWorkspace.contentType')} value={getMediaTypeLabel(detail.task.media_type)} />
         <DetailItem label={t('taskWorkspace.status')} value={getStatusLabel(detail.task.status_summary.status)} />
         <DetailItem label={t('taskWorkspace.sourcePathShort')} value={detail.task.source_path} />
@@ -889,7 +890,7 @@ function RevokePublishSection({ detail, service = defaultTaskService }: { detail
 
 // ── main page ──
 
-export function TaskDetailPage({ service = defaultTaskService }: { service?: TaskDetailService }) {
+export function TaskDetailPage({ service = defaultTaskService, showOwner = false }: { service?: TaskDetailService; showOwner?: boolean }) {
   const { t } = useTranslation()
   const { taskId } = useParams<{ taskId: string }>()
 
@@ -955,7 +956,7 @@ export function TaskDetailPage({ service = defaultTaskService }: { service?: Tas
         {/* left: task facts */}
         <div className="min-w-0 space-y-4">
           <CompletedHeroSection detail={detail} />
-          <BaseInfoSection detail={detail} />
+          <BaseInfoSection detail={detail} showOwner={showOwner} />
           <SourceSelectionSection sourceSelection={detail.source_selection} blockedReason={null} />
           <ManualMetadataResearchSection detail={detail} service={service} />
           <MetadataDetailSection metadataDetail={detail.metadata_detail} />
