@@ -4,7 +4,22 @@
     "taskList": "Tasks",
     "resourceSearch": "Search",
     "settings": "Settings",
-    "manualUpload": "Manual Upload"
+    "manualUpload": "Manual Upload",
+    "account": "Account",
+    "users": "Users"
+  },
+  "userManagement": {
+    "title": "Users", "description": "Create and manage local Media Pilot users",
+    "username": "Username", "password": "Password", "role": "Role", "status": "Status",
+    "adultAccess": "Adult access", "createdAt": "Created", "actions": "Actions",
+    "admin": "Administrator", "user": "User", "enabled": "Enabled", "disabled": "Disabled",
+    "allowed": "Allowed", "denied": "Denied", "protected": "Protected",
+    "enable": "Enable", "disable": "Disable", "enableAdult": "Enable adult access", "disableAdult": "Disable adult access",
+    "create": "Create user", "resetPassword": "Reset password", "newPassword": "New password",
+    "resetDescription": "Set a new password for {{username}}. All existing sessions will be revoked.",
+    "passwordRule": "8–128 characters", "createSuccess": "User created",
+    "updateSuccess": "User settings updated", "resetSuccess": "Password reset",
+    "operationFailed": "Operation failed. Please try again."
   },
   "topBar": {
     "title": "Media Pilot",

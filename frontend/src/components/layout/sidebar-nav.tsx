@@ -13,9 +13,9 @@ const navKeys = [
   { to: '/discovery', icon: Search, labelKey: 'nav.resourceSearch' },
   { to: '/manual-upload', icon: Upload, labelKey: 'nav.manualUpload' },
   { to: '/tasks', icon: ListTodo, labelKey: 'nav.taskList' },
-  { to: '/account', icon: KeyRound, labelKey: '账号设置' },
+  { to: '/account', icon: KeyRound, labelKey: 'nav.account' },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
-  { to: '/users', icon: UserRoundCog, labelKey: '用户管理', adminOnly: true },
+  { to: '/users', icon: UserRoundCog, labelKey: 'nav.users', adminOnly: true },
 ]
 
 export function SidebarNav({ open, onClose }: SidebarNavProps) {
@@ -51,7 +51,7 @@ export function SidebarNav({ open, onClose }: SidebarNavProps) {
 
         <nav className="flex flex-col gap-1 px-2 py-3">
           {visibleItems.map((item) => {
-            const label = ['用户管理', '账号设置'].includes(item.labelKey) ? item.labelKey : t(item.labelKey)
+            const label = t(item.labelKey)
             return (
               <NavLink
                 key={item.to}
