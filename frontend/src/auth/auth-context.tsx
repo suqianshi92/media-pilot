@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { createAuthService, type AuthUser } from '@/services/auth-service'
 import { abortAuthenticatedRequests } from '@/services/http-client'
@@ -17,6 +18,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient()
   const mock = import.meta.env.VITE_API_MODE === 'mock'
   const [state, setState] = useState<AuthState>(mock ? 'authenticated' : 'loading')
   const [user, setUser] = useState<AuthUser | null>(mock ? {
@@ -27,33 +29,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (mock) return
     void service.status().then(async ({ initialized }) => {
-      if (!initialized) return setState('uninitialized')
+      if (!initialized) {
+        queryClient.clear()
+        return setState('uninitialized')
+      }
       try {
         const result = await service.me()
+        queryClient.clear()
         setUser(result.user)
         setState('authenticated')
       } catch {
+        queryClient.clear()
         setState('anonymous')
       }
-    }).catch(() => setState('anonymous'))
-  }, [mock, service])
+    }).catch(() => {
+      queryClient.clear()
+      setState('anonymous')
+    })
+  }, [mock, queryClient, service])
 
   useEffect(() => {
     if (mock) return
-    const unauthorized = () => { setUser(null); setState('anonymous') }
+    const unauthorized = () => {
+      queryClient.clear()
+      setUser(null)
+      setState('anonymous')
+    }
     window.addEventListener('media-pilot:unauthorized', unauthorized)
     return () => window.removeEventListener('media-pilot:unauthorized', unauthorized)
-  }, [mock])
+  }, [mock, queryClient])
 
   const value: AuthContextValue = {
     state,
     user,
     async initialize(username, password) {
       const result = await service.initialize(username, password)
+      queryClient.clear()
       setUser(result.user); setState('authenticated')
     },
     async login(username, password) {
       const result = await service.login(username, password)
+      queryClient.clear()
       setUser(result.user); setState('authenticated')
     },
     async logout() {
@@ -62,11 +78,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // 服务端会话可能已经过期或网络不可用；本地退出仍必须完成。
       }
-      abortAuthenticatedRequests(); setUser(null); setState('anonymous')
+      abortAuthenticatedRequests(); queryClient.clear(); setUser(null); setState('anonymous')
     },
     async changePassword(currentPassword, newPassword) {
       await service.changePassword(currentPassword, newPassword)
       abortAuthenticatedRequests()
+      queryClient.clear()
       setUser(null); setState('anonymous')
     },
   }
