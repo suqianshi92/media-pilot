@@ -94,6 +94,11 @@ def get_current_admin(auth: CurrentAuthDep) -> AuthContext:
 CurrentAdminDep = Annotated[AuthContext, Depends(get_current_admin)]
 
 
+def require_adult_access(auth: AuthContext) -> None:
+    if auth.user.role != "admin" and not auth.user.can_access_adult:
+        raise HTTPException(status_code=403, detail="Adult content access required")
+
+
 def get_task_access_scope(auth: CurrentAuthDep) -> TaskAccessScope:
     return TaskAccessScope(
         user_id=auth.user.id,

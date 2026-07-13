@@ -137,6 +137,30 @@ def test_other_users_and_inaccessible_adult_tasks_are_not_found(
         f"/api/v1/agent-decisions/{own_conflict.id}/reply",
         json={"option_id": "overwrite_target"},
     ).status_code == 403
+    assert client.post(
+        "/api/v1/manual-upload/submit",
+        json={"items": [{
+            "key": "adult-magnet",
+            "kind": "magnet",
+            "magnet_uri": "magnet:?xt=urn:btih:abc123&dn=Adult",
+            "preselected_profile": "tpdb_adult_movie",
+            "preselected_provider": "tpdb",
+            "preselected_external_id": "adult:123",
+        }]},
+    ).status_code == 403
+    assert client.post(
+        f"/api/v1/tasks/{own.id}/manual-select",
+        json={
+            "provider": "tpdb",
+            "provider_id": "adult:123",
+            "title": "Adult title",
+            "media_type": "movie",
+        },
+    ).status_code == 403
+    assert client.post(
+        f"/api/v1/tasks/{own.id}/publish-without-metadata",
+        json={"confirmed": True, "library_target": "adult"},
+    ).status_code == 403
 
     admin = AuthenticatedTestClient(app)
     task_detail = admin.get(f"/api/v1/tasks/{other.id}")

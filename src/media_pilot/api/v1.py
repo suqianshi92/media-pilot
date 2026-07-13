@@ -13,6 +13,7 @@ from media_pilot.api.auth_dependencies import (
     CurrentAuthDep,
     TaskAccessDep,
     build_stream_authorizer,
+    require_adult_access,
     require_authorized_agent_decision,
     require_authorized_download_task,
     require_authorized_ingest_task,
@@ -1319,7 +1320,12 @@ def execute_delete_task_input(task_id: str, body: dict, request: Request) -> Api
     "/tasks/{task_id}/manual-select",
     dependencies=[Depends(require_authorized_ingest_task)],
 )
-def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
+def manual_select_metadata(
+    task_id: str,
+    body: dict,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
     """人工辅助检索选择元数据候选。"""
     session_factory: sessionmaker[Session] | None = getattr(
         request.app.state, "session_factory", None
@@ -1335,6 +1341,8 @@ def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnv
     from media_pilot.services.manual_selection import submit_manual_selection
 
     req = ManualSelectRequest(**body)
+    if req.provider == "tpdb":
+        require_adult_access(auth)
 
     with session_factory() as session:
         result = submit_manual_selection(
@@ -1405,7 +1413,12 @@ def manual_select_metadata(task_id: str, body: dict, request: Request) -> ApiEnv
     "/tasks/{task_id}/publish-without-metadata",
     dependencies=[Depends(require_authorized_ingest_task)],
 )
-def publish_task_without_metadata(task_id: str, body: dict, request: Request) -> ApiEnvelope[dict]:
+def publish_task_without_metadata(
+    task_id: str,
+    body: dict,
+    request: Request,
+    auth: CurrentAuthDep,
+) -> ApiEnvelope[dict]:
     """显式确认后执行无元数据入库。"""
     session_factory: sessionmaker[Session] | None = getattr(
         request.app.state, "session_factory", None
@@ -1421,6 +1434,9 @@ def publish_task_without_metadata(task_id: str, body: dict, request: Request) ->
         return ApiEnvelope(status="error", data={}, messages=[
             ApiMessage(level="error", code="not_confirmed", text="需显式确认无元数据入库")
         ], meta={})
+
+    if body.get("library_target") == "adult":
+        require_adult_access(auth)
 
     from media_pilot.orchestration.db_retry import safe_commit
     from media_pilot.repository.repositories import (

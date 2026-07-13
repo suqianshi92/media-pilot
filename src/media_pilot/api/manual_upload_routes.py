@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_pilot.accounts.task_classification import is_adult_metadata_selection
-from media_pilot.api.auth_dependencies import CurrentAuthDep
+from media_pilot.api.auth_dependencies import CurrentAuthDep, require_adult_access
 from media_pilot.api.schemas import ApiEnvelope, ApiMessage
 from media_pilot.config import AppConfig
 from media_pilot.repository.repositories import (
@@ -192,6 +192,15 @@ def submit_uploads(
     auth: CurrentAuthDep,
 ) -> ApiEnvelope[SubmitResult]:
     """将待导入条目提交为正式下载任务。"""
+    if any(
+        is_adult_metadata_selection(
+            profile=item.preselected_profile,
+            provider=item.preselected_provider,
+        )
+        for item in body.items
+    ):
+        require_adult_access(auth)
+
     config: AppConfig | None = getattr(request.app.state, "config", None)
     if config is None:
         return ApiEnvelope(
