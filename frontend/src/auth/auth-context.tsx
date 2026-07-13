@@ -51,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (mock) return
     const unauthorized = () => {
+      abortAuthenticatedRequests()
       queryClient.clear()
       setUser(null)
       setState('anonymous')
