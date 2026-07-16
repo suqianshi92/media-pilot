@@ -14,8 +14,8 @@ const navKeys = [
   { to: '/manual-upload', icon: Upload, labelKey: 'nav.manualUpload' },
   { to: '/tasks', icon: ListTodo, labelKey: 'nav.taskList' },
   { to: '/account', icon: KeyRound, labelKey: 'nav.account' },
-  { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
   { to: '/users', icon: UserRoundCog, labelKey: 'nav.users', adminOnly: true },
+  { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ]
 
 export function SidebarNav({ open, onClose }: SidebarNavProps) {

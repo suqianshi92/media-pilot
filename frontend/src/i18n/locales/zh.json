@@ -15,9 +15,9 @@
     "admin": "管理员", "user": "普通用户", "enabled": "启用", "disabled": "停用",
     "allowed": "允许", "denied": "禁止", "protected": "受保护",
     "enable": "启用", "disable": "停用", "enableAdult": "开启成人权限", "disableAdult": "关闭成人权限",
-    "create": "创建普通用户", "resetPassword": "重置密码", "newPassword": "新密码",
+    "create": "创建普通用户", "confirmCreate": "确认创建", "resetPassword": "重置密码", "newPassword": "新密码",
     "resetDescription": "为用户 {{username}} 设置新密码，现有会话将全部撤销。",
-    "passwordRule": "8–128 个字符", "createSuccess": "用户创建成功",
+    "passwordRule": "密码至少 8 个字符", "createSuccess": "用户创建成功",
     "updateSuccess": "用户设置已更新", "resetSuccess": "密码重置成功",
     "operationFailed": "操作失败，请重试"
   },

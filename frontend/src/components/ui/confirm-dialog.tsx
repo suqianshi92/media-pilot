@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button'
 export interface ConfirmDialogProps {
   open: boolean
   title: string
-  description: string
+  description?: string
   confirmLabel?: string
   cancelLabel?: string
   children?: ReactNode
   variant?: 'default' | 'destructive'
   loading?: boolean
+  confirmDisabled?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -25,10 +26,12 @@ export function ConfirmDialog({
   children,
   variant = 'default',
   loading = false,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
 
   useEffect(() => {
     if (!open) return
@@ -51,9 +54,10 @@ export function ConfirmDialog({
         className="relative z-50 w-full max-w-md rounded-lg border border-border bg-surface p-6 shadow-lg"
         role="alertdialog"
         aria-modal="true"
+        aria-labelledby={titleId}
       >
-        <h3 className="text-lg font-semibold text-surface-foreground">{title}</h3>
-        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        <h3 id={titleId} className="text-lg font-semibold text-surface-foreground">{title}</h3>
+        {description ? <p className="mt-2 text-sm text-muted-foreground">{description}</p> : null}
         {children ? <div className="mt-4">{children}</div> : null}
         <div className="mt-6 flex justify-end gap-3">
           <Button variant="secondary" onClick={onCancel} disabled={loading}>
@@ -61,7 +65,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={isDestructive ? 'bg-red-600 text-white hover:bg-red-700' : ''}
           >
             {loading ? '处理中...' : confirmLabel}

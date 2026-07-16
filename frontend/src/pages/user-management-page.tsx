@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react'
+import { useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createColumnHelper } from '@tanstack/react-table'
+import { UserPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTable } from '@/components/layout/data-table'
@@ -19,6 +20,7 @@ export function UserManagementPage({ service = createUserService() }: { service?
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [createOpen, setCreateOpen] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [adult, setAdult] = useState(false)
@@ -33,7 +35,7 @@ export function UserManagementPage({ service = createUserService() }: { service?
   const createMutation = useMutation({
     mutationFn: service.create,
     onSuccess: () => {
-      setUsername(''); setPassword(''); setAdult(false); void refresh()
+      setCreateOpen(false); setUsername(''); setPassword(''); setAdult(false); void refresh()
       showToast(t('userManagement.createSuccess'))
     },
     onError: (error) => showToast(error.message || t('userManagement.operationFailed'), 'error'),
@@ -70,23 +72,40 @@ export function UserManagementPage({ service = createUserService() }: { service?
     columnHelper.display({ id: 'actions', header: t('userManagement.actions'), cell: ({ row }) => renderActions(row.original) }),
   ]
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
+  function submitCreate() {
+    if (!username || password.length < 8) return
     createMutation.mutate({ username, password, can_access_adult: adult })
+  }
+  function closeCreateDialog() {
+    setCreateOpen(false); setUsername(''); setPassword(''); setAdult(false)
   }
   const items = users.data?.data.items ?? []
   return <div className="grid gap-6">
-    <div><h1 className="text-xl font-semibold">{t('userManagement.title')}</h1><p className="text-sm text-muted-foreground">{t('userManagement.description')}</p></div>
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4">
-      <label className="grid gap-1 text-sm">{t('userManagement.username')}<Input value={username} onChange={(e) => setUsername(e.target.value)} required /></label>
-      <label className="grid gap-1 text-sm">{t('userManagement.password')}<Input type="password" minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-      <label className="flex h-10 items-center gap-2 text-sm"><input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} />{t('userManagement.adultAccess')}</label>
-      <Button type="submit" disabled={createMutation.isPending}>{t('userManagement.create')}</Button>
-    </form>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><h1 className="text-xl font-semibold">{t('userManagement.title')}</h1><p className="text-sm text-muted-foreground">{t('userManagement.description')}</p></div>
+      <Button onClick={() => setCreateOpen(true)}><UserPlus className="h-4 w-4" />{t('userManagement.create')}</Button>
+    </div>
     {users.isError ? <p role="alert">用户列表加载失败</p> : <DataTable
       columns={columns} data={items} disablePagination renderMobileCard={(user) => <div className="grid gap-3 rounded border p-3"><strong>{user.username}</strong>{renderActions(user, false)}</div>}
       tableClassName="min-w-[900px]" serverPagination={{ page, pageSize, total: users.data?.meta.total ?? 0, pageSizeOptions: [10, 20, 50, 100], pending: users.isFetching, onPageChange: setPage, onPageSizeChange: (value) => { setPage(1); setPageSize(value) } }}
     />}
+    <ConfirmDialog
+      open={createOpen}
+      title={t('userManagement.create')}
+      description={t('userManagement.passwordRule')}
+      confirmLabel={t('userManagement.confirmCreate')}
+      cancelLabel={t('common.cancel')}
+      loading={createMutation.isPending}
+      confirmDisabled={!username || password.length < 8}
+      onCancel={closeCreateDialog}
+      onConfirm={submitCreate}
+    >
+      <div className="grid gap-4">
+        <label className="grid gap-1 text-sm">{t('userManagement.username')}<Input value={username} onChange={(e) => setUsername(e.target.value)} required /></label>
+        <label className="grid gap-1 text-sm">{t('userManagement.password')}<Input type="password" minLength={8} maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} />{t('userManagement.adultAccess')}</label>
+      </div>
+    </ConfirmDialog>
     <ConfirmDialog open={resetTarget !== null} title={t('userManagement.resetPassword')} description={t('userManagement.resetDescription', { username: resetTarget?.username })} confirmLabel={t('common.confirm')} cancelLabel={t('common.cancel')} loading={resetMutation.isPending} onCancel={() => { setResetTarget(null); setResetPassword('') }} onConfirm={() => resetTarget && resetPassword.length >= 8 && resetMutation.mutate({ id: resetTarget.id, value: resetPassword })}>
       <Input aria-label={t('userManagement.newPassword')} type="password" minLength={8} maxLength={128} value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder={t('userManagement.passwordRule')} />
     </ConfirmDialog>

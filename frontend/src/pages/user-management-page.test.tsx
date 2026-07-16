@@ -1,9 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, expect, it, vi } from 'vitest'
 
 import { UserManagementPage } from '@/pages/user-management-page'
 import '@/i18n'
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 it('renders users in the shared server-paginated table and protects admin row', async () => {
   const service = {
@@ -23,4 +29,35 @@ it('renders users in the shared server-paginated table and protects admin row', 
   expect(screen.getByTestId('user-admin-actions')).toHaveTextContent('受保护')
   expect(screen.getByTestId('user-alice-actions')).toHaveTextContent('停用')
   expect(service.list).toHaveBeenCalledWith(1, 10)
+})
+
+it('creates a user through a dialog and refreshes the list after success', async () => {
+  const service = {
+    list: vi.fn().mockResolvedValue({ data: { items: [] }, meta: { page: 1, page_size: 10, total: 0 } }),
+    create: vi.fn().mockResolvedValue({ data: {} }),
+    update: vi.fn(),
+    resetPassword: vi.fn(),
+  }
+  render(<QueryClientProvider client={new QueryClient()}><UserManagementPage service={service} /></QueryClientProvider>)
+
+  await waitFor(() => expect(service.list).toHaveBeenCalledOnce())
+  expect(screen.queryByRole('alertdialog', { name: '创建普通用户' })).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: '创建普通用户' }))
+
+  const dialog = screen.getByRole('alertdialog', { name: '创建普通用户' })
+  expect(dialog).toHaveTextContent('密码至少 8 个字符')
+  await userEvent.type(screen.getByLabelText('用户名'), 'Alice')
+  await userEvent.type(screen.getByLabelText('密码'), 'alice-password')
+  await userEvent.click(screen.getByLabelText('成人权限'))
+  await userEvent.click(screen.getByRole('button', { name: '确认创建' }))
+
+  await waitFor(() => expect(service.create).toHaveBeenCalledOnce())
+  expect(service.create.mock.calls[0][0]).toEqual({
+    username: 'Alice',
+    password: 'alice-password',
+    can_access_adult: true,
+  })
+  await waitFor(() => expect(service.list).toHaveBeenCalledTimes(2))
+  expect(screen.queryByRole('alertdialog', { name: '创建普通用户' })).not.toBeInTheDocument()
 })
