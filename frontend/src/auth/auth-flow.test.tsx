@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { RouterProvider } from 'react-router-dom'
 
@@ -41,7 +42,52 @@ it('redirects an uninitialized installation to initial admin creation', async ()
   const router = renderRoute('/tasks')
 
   await screen.findByRole('heading', { name: '创建初始管理员' })
+  expect(screen.getByText('用户名', { selector: 'label' })).toBeInTheDocument()
+  expect(screen.getByText('密码', { selector: 'label' })).toBeInTheDocument()
+  expect(screen.getByText('确认密码', { selector: 'label' })).toBeInTheDocument()
+  expect(screen.getByLabelText('用户名')).toBeInTheDocument()
+  expect(screen.getByLabelText('密码', { selector: 'input' })).toBeInTheDocument()
+  expect(screen.getByLabelText('确认密码')).toBeInTheDocument()
+  expect(screen.getByText('密码至少 8 个字符')).toBeInTheDocument()
   expect(router.state.location.pathname).toBe('/initialize')
+})
+
+it('does not initialize when the password confirmation differs', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response({
+    status: 'success', data: { initialized: false },
+  }))
+
+  renderRoute('/initialize')
+
+  await userEvent.type(await screen.findByLabelText('用户名'), 'Owner')
+  await userEvent.type(screen.getByLabelText('密码', { selector: 'input' }), 'password-one')
+  await userEvent.type(screen.getByLabelText('确认密码'), 'password-two')
+  await userEvent.click(screen.getByRole('button', { name: '创建并登录' }))
+
+  expect(screen.getByRole('alert')).toHaveTextContent('两次输入的密码不一致')
+  expect(fetchMock).toHaveBeenCalledOnce()
+})
+
+it('initializes when both password entries match', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(response({ status: 'success', data: { initialized: false } }))
+    .mockResolvedValueOnce(response({ status: 'success', data: { user: {
+      id: 'owner', username: 'Owner', role: 'admin', can_access_adult: true, is_enabled: true,
+    } } }))
+
+  renderRoute('/initialize')
+
+  await userEvent.type(await screen.findByLabelText('用户名'), 'Owner')
+  await userEvent.type(screen.getByLabelText('密码', { selector: 'input' }), 'owner-password')
+  await userEvent.type(screen.getByLabelText('确认密码'), 'owner-password')
+  await userEvent.click(screen.getByRole('button', { name: '创建并登录' }))
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/auth/initialize')
+  expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+    username: 'Owner',
+    password: 'owner-password',
+  })
 })
 
 it('redirects an anonymous user to login and preserves the target', async () => {
