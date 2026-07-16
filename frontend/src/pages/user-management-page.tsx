@@ -58,8 +58,8 @@ export function UserManagementPage({ service = createUserService() }: { service?
       const testId = withTestId ? { 'data-testid': `user-${user.id}-actions` } : {}
       if (user.role === 'admin') return <span {...testId}>{t('userManagement.protected')}</span>
       return <div className="flex flex-wrap gap-2" {...testId}>
-        <Button size="sm" variant="secondary" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate({ id: user.id, data: { is_enabled: !user.is_enabled } })}>{t(user.is_enabled ? 'userManagement.disable' : 'userManagement.enable')}</Button>
-        <Button size="sm" variant="secondary" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate({ id: user.id, data: { can_access_adult: !user.can_access_adult } })}>{t(user.can_access_adult ? 'userManagement.disableAdult' : 'userManagement.enableAdult')}</Button>
+        <Button size="sm" variant={user.is_enabled ? 'destructive' : 'secondary'} disabled={updateMutation.isPending} onClick={() => updateMutation.mutate({ id: user.id, data: { is_enabled: !user.is_enabled } })}>{t(user.is_enabled ? 'userManagement.disable' : 'userManagement.enable')}</Button>
+        <Button size="sm" variant="warning" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate({ id: user.id, data: { can_access_adult: !user.can_access_adult } })}>{t(user.can_access_adult ? 'userManagement.disableAdult' : 'userManagement.enableAdult')}</Button>
         <Button size="sm" variant="secondary" onClick={() => setResetTarget(user)}>{t('userManagement.resetPassword')}</Button>
       </div>
   }

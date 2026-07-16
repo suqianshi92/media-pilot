@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -27,7 +27,9 @@ it('renders users in the shared server-paginated table and protects admin row', 
   await waitFor(() => expect(screen.getAllByText('Owner').length).toBeGreaterThan(0))
   expect(screen.getAllByText('Alice').length).toBeGreaterThan(0)
   expect(screen.getByTestId('user-admin-actions')).toHaveTextContent('受保护')
-  expect(screen.getByTestId('user-alice-actions')).toHaveTextContent('停用')
+  const actions = within(screen.getByTestId('user-alice-actions'))
+  expect(actions.getByRole('button', { name: '停用' })).toHaveClass('border-destructive', 'text-destructive')
+  expect(actions.getByRole('button', { name: '开启成人权限' })).toHaveClass('border-warning', 'text-warning')
   expect(service.list).toHaveBeenCalledWith(1, 10)
 })
 
@@ -41,11 +43,11 @@ it('creates a user through a dialog and refreshes the list after success', async
   render(<QueryClientProvider client={new QueryClient()}><UserManagementPage service={service} /></QueryClientProvider>)
 
   await waitFor(() => expect(service.list).toHaveBeenCalledOnce())
-  expect(screen.queryByRole('alertdialog', { name: '创建普通用户' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('alertdialog', { name: '创建用户' })).not.toBeInTheDocument()
 
-  await userEvent.click(screen.getByRole('button', { name: '创建普通用户' }))
+  await userEvent.click(screen.getByRole('button', { name: '创建用户' }))
 
-  const dialog = screen.getByRole('alertdialog', { name: '创建普通用户' })
+  const dialog = screen.getByRole('alertdialog', { name: '创建用户' })
   expect(dialog).toHaveTextContent('密码至少 8 个字符')
   await userEvent.type(screen.getByLabelText('用户名'), 'Alice')
   await userEvent.type(screen.getByLabelText('密码'), 'alice-password')
@@ -59,5 +61,5 @@ it('creates a user through a dialog and refreshes the list after success', async
     can_access_adult: true,
   })
   await waitFor(() => expect(service.list).toHaveBeenCalledTimes(2))
-  expect(screen.queryByRole('alertdialog', { name: '创建普通用户' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('alertdialog', { name: '创建用户' })).not.toBeInTheDocument()
 })

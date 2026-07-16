@@ -43,3 +43,16 @@
 - [x] 运行相关测试并确认通过。
 - [x] 运行前端全量测试、ESLint 和生产构建。
 - [x] 提交实现。
+
+### Task 3: 调整创建文案和操作语义
+
+**Files:**
+- Modify: `frontend/src/components/ui/button.tsx`
+- Modify: `frontend/src/pages/user-management-page.tsx`
+- Modify: `frontend/src/pages/user-management-page.test.tsx`
+- Modify: `frontend/src/i18n/locales/zh.json`
+
+- [x] 写失败测试，覆盖“创建用户”文案、红色停用按钮和橙色成人权限按钮。
+- [x] 增加 `destructive`、`warning` 按钮变体并应用到用户操作列。
+- [x] 运行相关测试、前端全量测试、ESLint 和生产构建。
+- [x] 提交实现。

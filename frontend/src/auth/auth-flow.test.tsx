@@ -112,5 +112,5 @@ it('blocks a normal user from administrator routes', async () => {
   renderRoute('/users')
 
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('无权访问此页面'))
-  expect(screen.queryByText('创建普通用户')).not.toBeInTheDocument()
+  expect(screen.queryByText('创建用户')).not.toBeInTheDocument()
 })
