@@ -68,7 +68,7 @@ describe('DecisionReplyCard — select_metadata_candidate decision type', () => 
                     {
                       id: 'candidate_aaaa',
                       label: 'Example Movie',
-                      description: 'movie · confidence=0.70 · source=tmdb',
+                      description: 'movie · confidence=0.65 · source=tmdb',
                       payload: {
                         candidate_id: 'aaaa',
                         provider: 'tmdb',
@@ -76,14 +76,14 @@ describe('DecisionReplyCard — select_metadata_candidate decision type', () => 
                         media_type: 'movie',
                         title: 'Example Movie',
                         year: 2026,
-                        confidence: 0.7,
+                        confidence: 0.65,
                         overview: 'A 2026 film.',
                       },
                     },
                     {
                       id: 'candidate_bbbb',
                       label: 'Example Movie 2',
-                      description: 'movie · confidence=0.65 · source=tmdb',
+                      description: 'movie · confidence=0.70 · source=tmdb',
                       payload: {
                         candidate_id: 'bbbb',
                         provider: 'tmdb',
@@ -91,7 +91,7 @@ describe('DecisionReplyCard — select_metadata_candidate decision type', () => 
                         media_type: 'movie',
                         title: 'Example Movie 2',
                         year: 2026,
-                        confidence: 0.65,
+                        confidence: 0.7,
                         overview: 'Another film.',
                       },
                     },
@@ -128,6 +128,12 @@ describe('DecisionReplyCard — select_metadata_candidate decision type', () => 
     // 标题 (label) 显示
     expect(screen.getByText('Example Movie')).toBeInTheDocument()
     expect(screen.getByText('Example Movie 2')).toBeInTheDocument()
+    const optionLabels = Array.from(
+      screen.getByTestId('decision-options-scroll').querySelectorAll('button'),
+      option => option.textContent,
+    )
+    expect(optionLabels[0]).toContain('Example Movie 2')
+    expect(optionLabels[1]).toContain('Example Movie')
     // 置信度显示 (i18n 当前为 zh, 显示 "置信度 0.70")
     expect(screen.getByText('置信度 0.70')).toBeInTheDocument()
     expect(screen.getByText('置信度 0.65')).toBeInTheDocument()

@@ -543,9 +543,20 @@ function SelectMetadataCandidateOptions({
   disabled: boolean
 }) {
   const { t } = useTranslation()
+  const sortedOptions = [...options].sort((left, right) => {
+    const leftPayload = (left.payload && typeof left.payload === 'object')
+      ? left.payload as Record<string, unknown>
+      : {}
+    const rightPayload = (right.payload && typeof right.payload === 'object')
+      ? right.payload as Record<string, unknown>
+      : {}
+    const leftConfidence = typeof leftPayload.confidence === 'number' ? leftPayload.confidence : 0
+    const rightConfidence = typeof rightPayload.confidence === 'number' ? rightPayload.confidence : 0
+    return rightConfidence - leftConfidence
+  })
   return (
     <div className="space-y-2">
-      {options.map((opt, i) => {
+      {sortedOptions.map((opt, i) => {
         const optId = typeof opt.id === 'string' ? opt.id : String(opt.id ?? i)
         const optLabel = typeof opt.label === 'string' ? opt.label : ''
         const optDescription = typeof opt.description === 'string' ? opt.description : ''

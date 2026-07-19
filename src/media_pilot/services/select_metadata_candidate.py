@@ -133,7 +133,12 @@ def build_candidate_options(
     provider 名字传给 fetch_and_save_metadata_detail.
     """
     options: list[CandidateOption] = []
-    for c in candidates:
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda candidate: candidate.confidence or 0,
+        reverse=True,
+    )
+    for c in sorted_candidates:
         c_payload = c.payload if isinstance(c.payload, dict) else {}
         # 真 provider: payload.preselected_provider 优先, 否则 source
         # (但 source == "preselected" 时退到 None, 由调用方用 default).

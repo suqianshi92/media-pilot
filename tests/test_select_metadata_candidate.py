@@ -98,6 +98,59 @@ class _DecisionShim:
 
 
 class TestBuildCandidateOptions:
+    def test_options_are_sorted_by_confidence_descending_stably(
+        self, tmp_path: Path,
+    ):
+        sf = _make_session_factory(tmp_path)
+        with sf() as session:
+            task = _make_task(session)
+            low_id = _add_candidate(
+                session, task_id=task.id, source="tmdb",
+                media_type="movie", title="Low", year=2026,
+                external_id="tmdb:low", confidence=0.2,
+            )
+            high_first_id = _add_candidate(
+                session, task_id=task.id, source="tmdb",
+                media_type="movie", title="High First", year=2026,
+                external_id="tmdb:high-first", confidence=0.9,
+            )
+            mid_id = _add_candidate(
+                session, task_id=task.id, source="tmdb",
+                media_type="movie", title="Mid", year=2026,
+                external_id="tmdb:mid", confidence=0.5,
+            )
+            high_second_id = _add_candidate(
+                session, task_id=task.id, source="tmdb",
+                media_type="movie", title="High Second", year=2026,
+                external_id="tmdb:high-second", confidence=0.9,
+            )
+
+        with sf() as session:
+            from media_pilot.repository.models import MediaCandidate
+            from media_pilot.services.select_metadata_candidate import (
+                build_candidate_options,
+            )
+
+            candidates = [
+                session.get(MediaCandidate, candidate_id)
+                for candidate_id in (
+                    low_id,
+                    high_first_id,
+                    mid_id,
+                    high_second_id,
+                )
+            ]
+            options = build_candidate_options(candidates)
+
+            assert [
+                option.payload["candidate_id"] for option in options
+            ] == [
+                high_first_id,
+                high_second_id,
+                mid_id,
+                low_id,
+            ]
+
     def test_options_carry_stable_candidate_id(self, tmp_path: Path):
         """payload.candidate_id 必须是 MediaCandidate.id, 不暴露路径或拼字符串."""
         sf = _make_session_factory(tmp_path)
