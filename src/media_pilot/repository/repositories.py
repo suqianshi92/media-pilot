@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from media_pilot.accounts.task_access import (
@@ -904,12 +904,23 @@ class AgentDecisionRequestRepository:
     def save_decision(
         self, decision_id: str, *, decision: dict, decided_by: str
     ) -> AgentDecisionRequest | None:
-        req = self._session.get(AgentDecisionRequest, decision_id)
-        if req is None:
-            return None
-        req.status = "decided"
-        req.decision = decision
-        req.decided_by = decided_by
-        req.decided_at = utc_now()
-        self._session.flush()
-        return req
+        now = utc_now()
+        statement = (
+            update(AgentDecisionRequest)
+            .where(
+                AgentDecisionRequest.id == decision_id,
+                AgentDecisionRequest.status == "pending",
+            )
+            .values(
+                status="decided",
+                decision=decision,
+                decided_by=decided_by,
+                decided_at=now,
+                updated_at=now,
+            )
+            .returning(AgentDecisionRequest)
+        )
+        return self._session.scalars(
+            statement,
+            execution_options={"populate_existing": True},
+        ).one_or_none()

@@ -131,6 +131,52 @@ def _make_decision(
     return dr
 
 
+def test_reply_stops_when_pending_decision_claim_is_lost(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from media_pilot.repository.repositories import (
+        AgentDecisionRequestRepository,
+        AgentMessageRepository,
+    )
+    from media_pilot.services.decision_reply import ReplyInput, reply_to_decision
+
+    config = _make_config(tmp_path)
+    sf = _make_session_factory(tmp_path)
+    with sf() as session:
+        task = _make_task(session, status="waiting_user")
+        run = _make_run(session, task.id)
+        decision = _make_decision(
+            session,
+            run_id=run.id,
+            task_id=task.id,
+            decision_type="select_metadata_candidate",
+            question="请选择候选",
+            options=[{"id": "candidate_1", "label": "Candidate"}],
+        )
+        decision_id = decision.id
+        run_id = run.id
+
+    monkeypatch.setattr(
+        AgentDecisionRequestRepository,
+        "save_decision",
+        lambda self, decision_id, *, decision, decided_by: None,
+    )
+
+    with sf() as session:
+        with pytest.raises(ValueError) as exc_info:
+            reply_to_decision(
+                session=session,
+                config=config,
+                reply=ReplyInput(
+                    decision_id=decision_id,
+                    option_id="candidate_1",
+                ),
+            )
+
+        assert exc_info.value.args[0]["status_code"] == 409
+        assert AgentMessageRepository(session).list_by_run(run_id) == []
+
+
 def test_metadata_unavailable_publish_without_metadata_publishes_deterministically(
     tmp_path: Path,
 ) -> None:

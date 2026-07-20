@@ -114,6 +114,47 @@ class TestAgentDecisionRequestRepository:
             assert saved.decided_by == "user"
             assert saved.decided_at is not None
 
+    def test_save_decision_only_claims_pending_request_once(self, tmp_path):
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        with sf() as session:
+            run, task = self._seed_run_and_task(session)
+            req = AgentDecisionRequestRepository(session).create(
+                AgentDecisionRequestCreate(
+                    run_id=run.id,
+                    task_id=task.id,
+                    decision_type="publish_confirmation",
+                ),
+            )
+            session.commit()
+            req_id = req.id
+
+        with sf() as session:
+            repo = AgentDecisionRequestRepository(session)
+            first = repo.save_decision(
+                req_id,
+                decision={"action": "publish"},
+                decided_by="user",
+            )
+            session.commit()
+            assert first is not None
+
+        with sf() as session:
+            repo = AgentDecisionRequestRepository(session)
+            second = repo.save_decision(
+                req_id,
+                decision={"action": "cancel"},
+                decided_by="user",
+            )
+            session.commit()
+            assert second is None
+
+        with sf() as session:
+            req = AgentDecisionRequestRepository(session).get(req_id)
+            assert req is not None
+            assert req.decision == {"action": "publish"}
+
     def test_list_pending_by_task(self, tmp_path):
         from tests.test_api_v1 import _make_session_factory
 

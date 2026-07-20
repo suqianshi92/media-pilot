@@ -144,11 +144,17 @@ def reply_to_decision(
         })
 
     # Save decision
-    dr_repo.save_decision(
+    claimed_decision = dr_repo.save_decision(
         reply.decision_id,
         decision=decision_data,
         decided_by=reply.decided_by,
     )
+    if claimed_decision is None:
+        raise ValueError({
+            "status_code": 409,
+            "detail": "Decision has already been decided",
+        })
+    decision = claimed_decision
 
     # Write system action message
     # 卡住 Agent 恢复 / 决策动作消息 改造: 不再写 role="user" + 内部审计

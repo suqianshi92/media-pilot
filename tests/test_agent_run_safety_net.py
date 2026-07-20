@@ -233,6 +233,91 @@ class TestAutoPublishSafetyNet:
     时主动调一次 publish_*_to_library, 推进 task 到 business 终态,
     不让 agent_running 卡死."""
 
+    def test_existing_successful_write_restores_task_without_republishing(
+        self, tmp_path, monkeypatch,
+    ):
+        from dataclasses import replace
+
+        from media_pilot.agent.tools.base import ToolResult
+        from media_pilot.agent.tools.registry import (
+            get_tool_registry,
+            register_builtin_tools,
+        )
+        from media_pilot.repository.models import MetadataDetail
+        from media_pilot.repository.repositories import WriteResultRepository
+        from tests.test_api_v1 import _make_session_factory
+
+        sf = _make_session_factory(tmp_path)
+        config = _make_config(tmp_path)
+        register_builtin_tools()
+        registry = get_tool_registry()
+        publish_calls: list[dict] = []
+
+        def _unexpected_publish(ctx, inp):
+            publish_calls.append(inp)
+            return ToolResult(status="failure", summary="must not republish")
+
+        original = registry._tools["publish_movie_to_library"]
+        monkeypatch.setitem(
+            registry._tools,
+            "publish_movie_to_library",
+            replace(original, handler=_unexpected_publish),
+        )
+
+        with sf() as session:
+            task = _make_task(
+                session,
+                source_path="/tmp/already-published.mkv",
+                media_type="movie",
+                status="agent_running",
+            )
+            task.current_step = "user_replied"
+            task.failure_reason = "stale failure"
+            session.add(MetadataDetail(
+                task_id=task.id,
+                provider="tmdb",
+                provider_id="movie:123",
+                media_type="movie",
+                title="Already Published",
+                original_title=None,
+                year=2026,
+                payload={},
+            ))
+            WriteResultRepository(session).save(
+                task.id,
+                status="warning",
+                payload={"warnings": ["clearlogo_download_failed"]},
+            )
+            session.commit()
+            task_id = task.id
+
+        mock = MockLLMClient()
+        mock.add_text_response("The task is done.")
+
+        with sf() as session:
+            from media_pilot.agent.runner import run_agent_turn
+
+            result = run_agent_turn(
+                session=session,
+                config=config,
+                task_id=task_id,
+                mode="auto_ingest",
+                mock_llm_client=mock,
+            )
+            session.commit()
+
+        assert result.status == "completed"
+        assert publish_calls == []
+
+        with sf() as session:
+            from media_pilot.repository.repositories import IngestTaskRepository
+
+            task = IngestTaskRepository(session).get(task_id)
+            assert task is not None
+            assert task.status == "library_import_complete"
+            assert task.current_step == "library_import_complete"
+            assert task.failure_reason is None
+
     def test_auto_publish_invoked_when_metadata_detail_present(
         self, tmp_path, monkeypatch,
     ):

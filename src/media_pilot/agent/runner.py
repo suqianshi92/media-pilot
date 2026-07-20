@@ -203,9 +203,13 @@ def _auto_publish_if_metadata_ready(
     """auto_ingest final text 安全网: 当任务 metadata detail 已落库但
     LLM 在 final text 收口前没调 publish_*_to_library, 主动调一次.
 
-    触发条件:
+    恢复条件:
     - mode == "auto_ingest" (default / freeform 不强制 auto-publish)
     - task.status == "agent_running" (工具没把 task 推到 business 终态)
+    - 已有 succeeded / warning WriteResult 时只恢复 task 终态, 不重复 publish
+
+    自动发布条件:
+    - 满足以上 mode / task.status 条件
     - MetadataDetail 已存在 (fetch_and_save_metadata_detail 成功过)
     - task.media_type 在 movie / show
 
@@ -214,12 +218,27 @@ def _auto_publish_if_metadata_ready(
     """
     from media_pilot.repository.repositories import (
         MetadataDetailRepository,
+        WriteResultRepository,
     )
 
     if mode != "auto_ingest":
         return False
     if task.status != "agent_running":
         return False
+    write_result = WriteResultRepository(session).get_for_task(task.id)
+    if write_result is not None and write_result.status in ("succeeded", "warning"):
+        task_repo.update_status(
+            task,
+            status="library_import_complete",
+            current_step="library_import_complete",
+        )
+        logger.warning(
+            "auto_ingest final-text safety net: restored published task %s "
+            "from write_result=%s",
+            task.id,
+            write_result.status,
+        )
+        return True
     if task.media_type not in ("movie", "show"):
         return False
     if task.status == "library_import_complete":
